@@ -3,7 +3,7 @@ from database import get_connection, init_db
 
 app = Flask(__name__)
 
-
+# Make sure database exists on startup
 init_db()
 
 @app.route("/products", methods=["GET"])
@@ -164,6 +164,58 @@ def add_mpesa_transaction():
         "sender_name": sender_name,
         "amount": amount
     }), 201
+
+
+@app.route("/reconcile", methods=["POST"])
+def reconcile():
+    conn = get_connection()
+
+    unmatched_sales = conn.execute(
+        "SELECT * FROM sales WHERE matched = 0 ORDER BY sale_time ASC"
+    ).fetchall()
+    unmatched_mpesa = conn.execute(
+        "SELECT * FROM mpesa_transactions WHERE matched = 0 ORDER BY transaction_time ASC"
+    ).fetchall()
+
+    unmatched_mpesa_list = [dict(t) for t in unmatched_mpesa]
+    matched_pairs = []
+
+    for sale in unmatched_sales:
+        sale_dict = dict(sale)
+        match = None
+
+        for txn in unmatched_mpesa_list:
+            if txn["amount"] == sale_dict["total_amount"]:
+                match = txn
+                break
+
+        if match:
+            conn.execute("UPDATE sales SET matched = 1 WHERE id = ?", (sale_dict["id"],))
+            conn.execute("UPDATE mpesa_transactions SET matched = 1 WHERE id = ?", (match["id"],))
+            unmatched_mpesa_list.remove(match)
+            matched_pairs.append({
+                "sale_id": sale_dict["id"],
+                "mpesa_id": match["id"],
+                "amount": sale_dict["total_amount"]
+            })
+
+    conn.commit()
+
+    still_unmatched_sales = conn.execute(
+        "SELECT sales.id, products.name, sales.quantity, sales.total_amount, sales.sale_time FROM sales JOIN products ON sales.product_id = products.id WHERE sales.matched = 0"
+    ).fetchall()
+    still_unmatched_mpesa = conn.execute(
+        "SELECT * FROM mpesa_transactions WHERE matched = 0"
+    ).fetchall()
+
+    conn.close()
+
+    return jsonify({
+        "matched_count": len(matched_pairs),
+        "matched_pairs": matched_pairs,
+        "unmatched_sales": [dict(s) for s in still_unmatched_sales],
+        "unmatched_mpesa": [dict(t) for t in still_unmatched_mpesa]
+    })
 
 
 if __name__ == "__main__":
