@@ -3,7 +3,7 @@ from database import get_connection, init_db
 
 app = Flask(__name__)
 
-# Make sure database exists on startup
+
 init_db()
 
 @app.route("/products", methods=["GET"])
@@ -118,6 +118,51 @@ def record_sale():
         "quantity": quantity,
         "total_amount": total_amount,
         "remaining_stock": new_stock
+    }), 201
+
+
+@app.route("/mpesa", methods=["GET"])
+def get_mpesa_transactions():
+    conn = get_connection()
+    transactions = conn.execute(
+        "SELECT * FROM mpesa_transactions ORDER BY transaction_time DESC"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(t) for t in transactions])
+
+@app.route("/mpesa", methods=["POST"])
+def add_mpesa_transaction():
+    data = request.get_json()
+    mpesa_code = data.get("mpesa_code")
+    sender_name = data.get("sender_name")
+    amount = data.get("amount")
+
+    if not mpesa_code or amount is None:
+        return jsonify({"error": "mpesa_code and amount are required"}), 400
+
+    conn = get_connection()
+
+    existing = conn.execute(
+        "SELECT * FROM mpesa_transactions WHERE mpesa_code = ?", (mpesa_code,)
+    ).fetchone()
+
+    if existing:
+        conn.close()
+        return jsonify({"error": "This M-Pesa code has already been recorded"}), 409
+
+    cursor = conn.execute(
+        "INSERT INTO mpesa_transactions (mpesa_code, sender_name, amount) VALUES (?, ?, ?)",
+        (mpesa_code, sender_name, amount)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+
+    return jsonify({
+        "id": new_id,
+        "mpesa_code": mpesa_code,
+        "sender_name": sender_name,
+        "amount": amount
     }), 201
 
 
