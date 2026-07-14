@@ -3,6 +3,13 @@ from database import get_connection, init_db
 
 app = Flask(__name__)
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
 # Make sure database exists on startup
 init_db()
 
@@ -15,13 +22,23 @@ def get_products():
 
 @app.route("/products", methods=["POST"])
 def add_product():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     name = data.get("name")
     price = data.get("price")
     stock = data.get("stock", 0)
 
-    if not name or price is None:
-        return jsonify({"error": "name and price are required"}), 400
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({"error": "name must be a non-empty string"}), 400
+    name = name.strip()[:100]
+
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
+        return jsonify({"error": "price must be a positive number"}), 400
+
+    if not isinstance(stock, int) or isinstance(stock, bool) or stock < 0:
+        return jsonify({"error": "stock must be zero or a positive whole number"}), 400
 
     conn = get_connection()
     cursor = conn.execute(
@@ -36,7 +53,10 @@ def add_product():
 
 @app.route("/products/<int:product_id>", methods=["PUT"])
 def update_product(product_id):
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     conn = get_connection()
 
     product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
@@ -47,6 +67,19 @@ def update_product(product_id):
     name = data.get("name", product["name"])
     price = data.get("price", product["price"])
     stock = data.get("stock", product["stock"])
+
+    if not isinstance(name, str) or not name.strip():
+        conn.close()
+        return jsonify({"error": "name must be a non-empty string"}), 400
+    name = name.strip()[:100]
+
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
+        conn.close()
+        return jsonify({"error": "price must be a positive number"}), 400
+
+    if not isinstance(stock, int) or isinstance(stock, bool) or stock < 0:
+        conn.close()
+        return jsonify({"error": "stock must be zero or a positive whole number"}), 400
 
     conn.execute(
         "UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?",
@@ -81,12 +114,21 @@ def get_sales():
 
 @app.route("/sales", methods=["POST"])
 def record_sale():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     product_id = data.get("product_id")
     quantity = data.get("quantity")
 
-    if not product_id or not quantity:
-        return jsonify({"error": "product_id and quantity are required"}), 400
+    if not isinstance(product_id, int) or isinstance(product_id, bool) or product_id <= 0:
+        return jsonify({"error": "product_id must be a positive integer"}), 400
+
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+        return jsonify({"error": "quantity must be a positive integer"}), 400
+
+    if quantity > 100000:
+        return jsonify({"error": "quantity is unrealistically large"}), 400
 
     conn = get_connection()
     product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
@@ -132,13 +174,25 @@ def get_mpesa_transactions():
 
 @app.route("/mpesa", methods=["POST"])
 def add_mpesa_transaction():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     mpesa_code = data.get("mpesa_code")
     sender_name = data.get("sender_name")
     amount = data.get("amount")
 
-    if not mpesa_code or amount is None:
-        return jsonify({"error": "mpesa_code and amount are required"}), 400
+    if not isinstance(mpesa_code, str) or not mpesa_code.strip():
+        return jsonify({"error": "mpesa_code must be a non-empty string"}), 400
+    mpesa_code = mpesa_code.strip()[:30]
+
+    if sender_name is not None:
+        if not isinstance(sender_name, str):
+            return jsonify({"error": "sender_name must be a string"}), 400
+        sender_name = sender_name.strip()[:100]
+
+    if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
+        return jsonify({"error": "amount must be a positive number"}), 400
 
     conn = get_connection()
 
