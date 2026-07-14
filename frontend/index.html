@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duka Manager — Ledger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ledger">
+
+    <header class="ledger-head">
+        <div class="head-left">
+            <h1>Duka Manager</h1>
+            <p class="ledger-no">Ledger No. <span id="ledgerNumber">001</span> &middot; <span id="todayDate"></span></p>
+        </div>
+        <div class="head-right">
+            <button id="reconcileBtnTop" class="stamp-btn">Reconcile Books</button>
+        </div>
+    </header>
+
+    <div class="totals-line" id="summaryGrid">
+        <div class="total-item">
+            <span class="total-label">Stock on hand</span>
+            <span class="total-value mono" id="totalStock">—</span>
+        </div>
+        <div class="total-divider">&middot;</div>
+        <div class="total-item">
+            <span class="total-label">Sales today</span>
+            <span class="total-value mono" id="totalSales">—</span>
+        </div>
+        <div class="total-divider">&middot;</div>
+        <div class="total-item">
+            <span class="total-label">Unmatched entries</span>
+            <span class="total-value mono" id="totalUnmatched">—</span>
+        </div>
+    </div>
+
+    <nav class="tabs" id="tabNav">
+        <button class="tab-btn active" data-tab="products">Stock</button>
+        <button class="tab-btn" data-tab="sales">Sales</button>
+        <button class="tab-btn" data-tab="mpesa">M-Pesa</button>
+        <button class="tab-btn" data-tab="reconcile">Reconcile</button>
+    </nav>
+
+    <main class="page">
+
+        <!-- STOCK -->
+        <section class="tab-content active" id="products-tab">
+            <div class="card">
+                <h2>Add to stock</h2>
+                <form id="productForm" class="row-form">
+                    <input type="text" id="productName" placeholder="Item name" required>
+                    <input type="number" id="productPrice" placeholder="Price (KES)" step="0.01" required>
+                    <input type="number" id="productStock" placeholder="Quantity" required>
+                    <button type="submit">Add entry</button>
+                </form>
+            </div>
+            <div class="card">
+                <h2>Current stock</h2>
+                <table>
+                    <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th></th></tr></thead>
+                    <tbody id="productsBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SALES -->
+        <section class="tab-content" id="sales-tab">
+            <div class="card">
+                <h2>Record a sale</h2>
+                <form id="saleForm" class="row-form">
+                    <select id="saleProduct" required></select>
+                    <input type="number" id="saleQuantity" placeholder="Quantity" min="1" required>
+                    <button type="submit">Record sale</button>
+                </form>
+            </div>
+            <div class="card">
+                <h2>Sales ledger</h2>
+                <table>
+                    <thead><tr><th>Item</th><th>Qty</th><th>Total</th><th>Time</th><th>Status</th></tr></thead>
+                    <tbody id="salesBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- MPESA -->
+        <section class="tab-content" id="mpesa-tab">
+            <div class="card">
+                <h2>Log M-Pesa payment</h2>
+                <form id="mpesaForm" class="row-form">
+                    <input type="text" id="mpesaCode" placeholder="M-Pesa code" required>
+                    <input type="text" id="mpesaSender" placeholder="Sender name">
+                    <input type="number" id="mpesaAmount" placeholder="Amount (KES)" step="0.01" required>
+                    <button type="submit">Log payment</button>
+                </form>
+            </div>
+            <div class="card">
+                <h2>M-Pesa ledger</h2>
+                <table>
+                    <thead><tr><th>Code</th><th>Sender</th><th>Amount</th><th>Time</th><th>Status</th></tr></thead>
+                    <tbody id="mpesaBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- RECONCILE -->
+        <section class="tab-content" id="reconcile-tab">
+            <div class="card reconcile-card">
+                <h2>Reconciliation</h2>
+                <p class="muted">Match every sale against a logged M-Pesa payment of the same amount. Anything left over gets flagged below.</p>
+                <button id="reconcileBtn">Stamp the books</button>
+                <div id="reconcileResults"></div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

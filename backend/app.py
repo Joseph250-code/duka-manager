@@ -1,14 +1,42 @@
 from flask import Flask, jsonify, request
 from database import get_connection, init_db
+import time
+from collections import defaultdict
 
 app = Flask(__name__)
 
+# Reject any request body larger than 100KB — no legitimate form submission here needs more
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
+
+# Only allow requests from your own local frontend server, not any random website
+ALLOWED_ORIGIN = "http://127.0.0.1:5500"
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
+
+@app.errorhandler(413)
+def request_too_large(e):
+    return jsonify({"error": "Request body too large"}), 413
+
+# ---- Simple in-memory rate limiter: max N requests per IP per window ----
+RATE_LIMIT = 30          # max requests
+RATE_WINDOW = 10         # seconds
+request_log = defaultdict(list)
+
+@app.before_request
+def rate_limit():
+    ip = request.remote_addr
+    now = time.time()
+    request_log[ip] = [t for t in request_log[ip] if now - t < RATE_WINDOW]
+
+    if len(request_log[ip]) >= RATE_LIMIT:
+        return jsonify({"error": "Too many requests — slow down"}), 429
+
+    request_log[ip].append(now)
 
 # Make sure database exists on startup
 init_db()
