@@ -1,9 +1,18 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
+from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_connection, init_db
 import time
+import secrets
 from collections import defaultdict
 
 app = Flask(__name__)
+
+# Session signing key — random each time the server starts, so old sessions
+# don't stay valid across restarts. Fine for a local single-user tool.
+app.secret_key = secrets.token_hex(32)
+
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 # Reject any request body larger than 100KB — no legitimate form submission here needs more
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
@@ -16,6 +25,7 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
 @app.errorhandler(413)
@@ -27,8 +37,11 @@ RATE_LIMIT = 30          # max requests
 RATE_WINDOW = 10         # seconds
 request_log = defaultdict(list)
 
+# Routes that don't require login
+PUBLIC_ROUTES = {"/signup", "/login"}
+
 @app.before_request
-def rate_limit():
+def rate_limit_and_auth():
     ip = request.remote_addr
     now = time.time()
     request_log[ip] = [t for t in request_log[ip] if now - t < RATE_WINDOW]
@@ -37,6 +50,91 @@ def rate_limit():
         return jsonify({"error": "Too many requests — slow down"}), 429
 
     request_log[ip].append(now)
+
+    if request.method == "OPTIONS":
+        return  # let CORS preflight through
+
+    if request.path in PUBLIC_ROUTES:
+        return
+
+    if not session.get("user_id"):
+        return jsonify({"error": "Not logged in"}), 401
+
+
+# ---- AUTH ----
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    username = data.get("username")
+    password = data.get("password")
+
+    if not isinstance(username, str) or not username.strip():
+        return jsonify({"error": "username must be a non-empty string"}), 400
+    username = username.strip()[:50]
+
+    if not isinstance(password, str) or len(password) < 6:
+        return jsonify({"error": "password must be at least 6 characters"}), 400
+
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+
+    if existing:
+        conn.close()
+        return jsonify({"error": "That username is already taken"}), 409
+
+    password_hash = generate_password_hash(password)
+
+    cursor = conn.execute(
+        "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+        (username, password_hash)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+
+    session["user_id"] = new_id
+    session["username"] = username
+
+    return jsonify({"message": "Account created", "username": username}), 201
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    username = data.get("username")
+    password = data.get("password")
+
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({"error": "username and password are required"}), 400
+
+    conn = get_connection()
+    user = conn.execute("SELECT * FROM users WHERE username = ?", (username.strip(),)).fetchone()
+    conn.close()
+
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+
+    return jsonify({"message": "Logged in", "username": user["username"]})
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logged out"})
+
+
+@app.route("/me", methods=["GET"])
+def me():
+    return jsonify({"username": session.get("username")})
 
 # Make sure database exists on startup
 init_db()
