@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_connection, init_db
-from mpesa import get_access_token
+from mpesa import get_access_token, trigger_stk_push
 import time
 import secrets
 from collections import defaultdict
@@ -411,6 +411,56 @@ def reconcile():
         "unmatched_sales": [dict(s) for s in still_unmatched_sales],
         "unmatched_mpesa": [dict(t) for t in still_unmatched_mpesa]
     })
+
+
+@app.route("/stkpush", methods=["POST"])
+def stk_push():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    phone_number = data.get("phone_number")
+    amount = data.get("amount")
+
+    if not isinstance(phone_number, str) or not phone_number.strip():
+        return jsonify({"error": "phone_number must be a non-empty string"}), 400
+    phone_number = phone_number.strip()
+
+    # Normalize common formats to 2547XXXXXXXX
+    if phone_number.startswith("0") and len(phone_number) == 10:
+        phone_number = "254" + phone_number[1:]
+    elif phone_number.startswith("+254"):
+        phone_number = phone_number[1:]
+
+    if not (phone_number.startswith("254") and len(phone_number) == 12 and phone_number.isdigit()):
+        return jsonify({"error": "phone_number must be a valid Kenyan number (e.g. 0712345678)"}), 400
+
+    if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
+        return jsonify({"error": "amount must be a positive number"}), 400
+
+    try:
+        result = trigger_stk_push(phone_number, amount)
+    except Exception as e:
+        return jsonify({"error": f"Failed to reach M-Pesa: {str(e)}"}), 502
+
+    checkout_request_id = result.get("CheckoutRequestID")
+    response_code = result.get("ResponseCode")
+
+    if response_code != "0" or not checkout_request_id:
+        return jsonify({"error": result.get("errorMessage", "M-Pesa rejected the request")}), 400
+
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO pending_stk_requests (user_id, checkout_request_id, phone_number, amount) VALUES (?, ?, ?, ?)",
+        (current_user_id(), checkout_request_id, phone_number, amount)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "message": "Payment prompt sent to customer's phone",
+        "checkout_request_id": checkout_request_id
+    }), 201
 
 
 # ---- TEMPORARY: M-Pesa OAuth test route (remove after confirming it works) ----
