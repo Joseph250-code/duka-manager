@@ -63,6 +63,7 @@
         <button class="tab-btn active" data-tab="products">Stock</button>
         <button class="tab-btn" data-tab="sales">Sales</button>
         <button class="tab-btn" data-tab="mpesa">M-Pesa</button>
+        <button class="tab-btn" data-tab="stkpush">Request Payment</button>
         <button class="tab-btn" data-tab="reconcile">Reconcile</button>
     </nav>
 
@@ -124,6 +125,20 @@
                     <thead><tr><th>Code</th><th>Sender</th><th>Amount</th><th>Time</th><th>Status</th></tr></thead>
                     <tbody id="mpesaBody"></tbody>
                 </table>
+            </div>
+        </section>
+
+        <!-- REQUEST PAYMENT (STK PUSH) -->
+        <section class="tab-content" id="stkpush-tab">
+            <div class="card">
+                <h2>Request payment from customer</h2>
+                <p class="muted">Enter the customer's phone number and the amount — they'll get a prompt on their phone to enter their M-Pesa PIN.</p>
+                <form id="stkForm" class="row-form">
+                    <input type="text" id="stkPhone" placeholder="Phone (e.g. 0712345678)" required>
+                    <input type="number" id="stkAmount" placeholder="Amount (KES)" step="0.01" required>
+                    <button type="submit" id="stkSubmitBtn">Send payment request</button>
+                </form>
+                <p class="muted" id="stkStatus"></p>
             </div>
         </section>
 
