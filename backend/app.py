@@ -2,13 +2,21 @@ from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_connection, init_db
 from mpesa import get_access_token, trigger_stk_push
+import os
 import time
-import secrets
+import uuid
 from collections import defaultdict
 
 app = Flask(__name__)
 
-app.secret_key = secrets.token_hex(32)
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+    )
+
+app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SAMESITE"] = "None"
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -73,6 +81,92 @@ def normalize_phone(phone_number):
     if phone_number.startswith("254") and len(phone_number) == 12 and phone_number.isdigit():
         return phone_number
     return None
+
+
+def release_reserved_stock(checkout_request_id, final_status="failed"):
+    """Release stock exactly once for a failed or rejected STK request."""
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        pending = conn.execute(
+            "SELECT * FROM pending_stk_requests WHERE checkout_request_id = ?",
+            (checkout_request_id,),
+        ).fetchone()
+
+        if not pending:
+            conn.commit()
+            return
+
+        if (
+            pending["stock_reserved"] == 1
+            and pending["product_id"]
+            and pending["quantity"]
+        ):
+            conn.execute(
+                """UPDATE products
+                   SET stock = stock + ?
+                   WHERE id = ? AND user_id = ?""",
+                (
+                    pending["quantity"],
+                    pending["product_id"],
+                    pending["user_id"],
+                ),
+            )
+
+        conn.execute(
+            """UPDATE pending_stk_requests
+               SET status = ?, stock_reserved = 0, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (final_status, pending["id"]),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def release_expired_reservations():
+    """Release sale stock held by STK requests that never completed."""
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        expired = conn.execute(
+            """SELECT * FROM pending_stk_requests
+               WHERE stock_reserved = 1
+                 AND status IN ('initiating', 'pending')
+                 AND expires_at IS NOT NULL
+                 AND expires_at <= CURRENT_TIMESTAMP"""
+        ).fetchall()
+
+        for pending in expired:
+            if pending["product_id"] and pending["quantity"]:
+                conn.execute(
+                    """UPDATE products
+                       SET stock = stock + ?
+                       WHERE id = ? AND user_id = ?""",
+                    (
+                        pending["quantity"],
+                        pending["product_id"],
+                        pending["user_id"],
+                    ),
+                )
+
+            conn.execute(
+                """UPDATE pending_stk_requests
+                   SET status = 'expired', stock_reserved = 0,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (pending["id"],),
+            )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ---- AUTH ----
@@ -156,6 +250,7 @@ init_db()
 
 @app.route("/products", methods=["GET"])
 def get_products():
+    release_expired_reservations()
     conn = get_connection()
     products = conn.execute(
         "SELECT * FROM products WHERE user_id = ?", (current_user_id(),)
@@ -262,6 +357,7 @@ def get_sales():
 
 @app.route("/sales", methods=["POST"])
 def record_sale():
+    release_expired_reservations()
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
@@ -319,10 +415,8 @@ def record_sale():
 @app.route("/sales/request-payment", methods=["POST"])
 def request_sale_payment():
     """
-    Instead of recording the sale immediately, this validates stock,
-    sends an STK Push for the exact sale amount, and stores a pending
-    request tied to the product/quantity. The sale itself only gets
-    recorded once the M-Pesa callback confirms payment (see /mpesa-callback).
+    Reserve stock first, send the STK Push, and create a pending request.
+    The sale is recorded only after a successful M-Pesa callback.
     """
     data = request.get_json(silent=True)
     if not data:
@@ -342,49 +436,106 @@ def request_sale_payment():
         return jsonify({"error": "quantity is unrealistically large"}), 400
 
     if not phone_number:
-        return jsonify({"error": "phone_number must be a valid Kenyan number (e.g. 0712345678)"}), 400
+        return jsonify({
+            "error": "phone_number must be a valid Kenyan number (e.g. 0712345678)"
+        }), 400
 
+    release_expired_reservations()
+
+    uid = current_user_id()
+    local_request_id = f"LOCAL-{uuid.uuid4().hex}"
     conn = get_connection()
-    product = conn.execute(
-        "SELECT * FROM products WHERE id = ? AND user_id = ?", (product_id, current_user_id())
-    ).fetchone()
 
-    if not product:
+    try:
+        # BEGIN IMMEDIATE serializes competing stock reservations in SQLite.
+        conn.execute("BEGIN IMMEDIATE")
+        product = conn.execute(
+            "SELECT * FROM products WHERE id = ? AND user_id = ?",
+            (product_id, uid),
+        ).fetchone()
+
+        if not product:
+            conn.rollback()
+            return jsonify({"error": "Product not found"}), 404
+
+        total_amount = round(product["price"] * quantity, 2)
+
+        stock_update = conn.execute(
+            """UPDATE products
+               SET stock = stock - ?
+               WHERE id = ? AND user_id = ? AND stock >= ?""",
+            (quantity, product_id, uid, quantity),
+        )
+
+        if stock_update.rowcount != 1:
+            conn.rollback()
+            return jsonify({"error": "Not enough stock available"}), 400
+
+        conn.execute(
+            """INSERT INTO pending_stk_requests
+               (user_id, checkout_request_id, phone_number, amount,
+                product_id, quantity, status, stock_reserved, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'initiating', 1,
+                       datetime('now', '+15 minutes'))""",
+            (
+                uid,
+                local_request_id,
+                phone_number,
+                total_amount,
+                product_id,
+                quantity,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"Could not reserve stock: {str(e)}"}), 500
+    finally:
         conn.close()
-        return jsonify({"error": "Product not found"}), 404
-
-    if product["stock"] < quantity:
-        conn.close()
-        return jsonify({"error": "Not enough stock available"}), 400
-
-    total_amount = product["price"] * quantity
 
     try:
         result = trigger_stk_push(phone_number, total_amount)
     except Exception as e:
-        conn.close()
+        release_reserved_stock(local_request_id, "failed")
         return jsonify({"error": f"Failed to reach M-Pesa: {str(e)}"}), 502
 
     checkout_request_id = result.get("CheckoutRequestID")
     response_code = result.get("ResponseCode")
 
-    if response_code != "0" or not checkout_request_id:
-        conn.close()
-        return jsonify({"error": result.get("errorMessage", "M-Pesa rejected the request")}), 400
+    if str(response_code) != "0" or not checkout_request_id:
+        release_reserved_stock(local_request_id, "failed")
+        return jsonify({
+            "error": result.get("errorMessage", "M-Pesa rejected the request")
+        }), 400
 
-    conn.execute(
-        """INSERT INTO pending_stk_requests
-           (user_id, checkout_request_id, phone_number, amount, product_id, quantity)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (current_user_id(), checkout_request_id, phone_number, total_amount, product_id, quantity)
-    )
-    conn.commit()
-    conn.close()
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        updated = conn.execute(
+            """UPDATE pending_stk_requests
+               SET checkout_request_id = ?, status = 'pending',
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE checkout_request_id = ? AND status = 'initiating'""",
+            (checkout_request_id, local_request_id),
+        )
+
+        if updated.rowcount != 1:
+            raise RuntimeError("The pending payment reservation could not be finalized")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        release_reserved_stock(local_request_id, "failed")
+        return jsonify({"error": f"Could not save the M-Pesa request: {str(e)}"}), 500
+    else:
+        conn.close()
 
     return jsonify({
         "message": f"Payment prompt sent for {product['name']} — waiting for customer to pay",
         "checkout_request_id": checkout_request_id,
-        "amount": total_amount
+        "amount": total_amount,
+        "remaining_stock": product["stock"] - quantity,
     }), 201
 
 
@@ -524,7 +675,7 @@ def stk_push():
     checkout_request_id = result.get("CheckoutRequestID")
     response_code = result.get("ResponseCode")
 
-    if response_code != "0" or not checkout_request_id:
+    if str(response_code) != "0" or not checkout_request_id:
         return jsonify({"error": result.get("errorMessage", "M-Pesa rejected the request")}), 400
 
     conn = get_connection()
@@ -552,74 +703,170 @@ def mpesa_callback():
     result_code = stk_callback.get("ResultCode")
 
     if not checkout_request_id:
-        return jsonify({"ResultCode": 1, "ResultDesc": "Missing CheckoutRequestID"}), 200
+        return jsonify({
+            "ResultCode": 1,
+            "ResultDesc": "Missing CheckoutRequestID",
+        }), 200
 
     conn = get_connection()
-    pending = conn.execute(
-        "SELECT * FROM pending_stk_requests WHERE checkout_request_id = ?",
-        (checkout_request_id,)
-    ).fetchone()
+    try:
+        # This write lock makes duplicate callbacks process one at a time.
+        conn.execute("BEGIN IMMEDIATE")
+        pending = conn.execute(
+            "SELECT * FROM pending_stk_requests WHERE checkout_request_id = ?",
+            (checkout_request_id,),
+        ).fetchone()
 
-    if not pending:
-        conn.close()
-        return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+        if not pending:
+            conn.commit()
+            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
 
-    if result_code == 0:
-        # Payment succeeded — pull the M-Pesa receipt number and confirmed amount
-        metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
-        meta = {item["Name"]: item.get("Value") for item in metadata_items}
+        # Idempotency guard: terminal requests must never be processed twice.
+        if pending["status"] in (
+            "success",
+            "failed",
+            "cancelled",
+            "paid_no_stock",
+        ):
+            conn.commit()
+            return jsonify({"ResultCode": 0, "ResultDesc": "Already processed"}), 200
 
-        mpesa_receipt = meta.get("MpesaReceiptNumber", f"STK{checkout_request_id[-10:]}")
-        amount_paid = meta.get("Amount", pending["amount"])
+        if str(result_code) == "0":
+            metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+            meta = {
+                item.get("Name"): item.get("Value")
+                for item in metadata_items
+                if item.get("Name")
+            }
 
-        conn.execute(
-            "UPDATE pending_stk_requests SET status = 'success', mpesa_receipt = ? WHERE checkout_request_id = ?",
-            (mpesa_receipt, checkout_request_id)
-        )
+            mpesa_receipt = meta.get(
+                "MpesaReceiptNumber",
+                f"STK{checkout_request_id[-10:]}",
+            )
+            amount_paid = meta.get("Amount", pending["amount"])
 
-        if pending["product_id"] and pending["quantity"]:
-            # This request was tied to a specific sale — record it directly, already matched.
-            product = conn.execute(
-                "SELECT * FROM products WHERE id = ?", (pending["product_id"],)
-            ).fetchone()
+            if pending["product_id"] and pending["quantity"]:
+                # Normally stock was deducted when the STK request was created.
+                # If the reservation expired before a late success callback arrived,
+                # try to reserve it again without allowing stock to go negative.
+                if pending["stock_reserved"] != 1:
+                    late_stock_update = conn.execute(
+                        """UPDATE products
+                           SET stock = stock - ?
+                           WHERE id = ? AND user_id = ? AND stock >= ?""",
+                        (
+                            pending["quantity"],
+                            pending["product_id"],
+                            pending["user_id"],
+                            pending["quantity"],
+                        ),
+                    )
 
-            if product and product["stock"] >= pending["quantity"]:
+                    if late_stock_update.rowcount != 1:
+                        conn.execute(
+                            """INSERT OR IGNORE INTO mpesa_transactions
+                               (user_id, mpesa_code, sender_name, amount, matched)
+                               VALUES (?, ?, ?, ?, 0)""",
+                            (
+                                pending["user_id"],
+                                mpesa_receipt,
+                                pending["phone_number"],
+                                amount_paid,
+                            ),
+                        )
+                        conn.execute(
+                            """UPDATE pending_stk_requests
+                               SET status = 'paid_no_stock', mpesa_receipt = ?,
+                                   stock_reserved = 0,
+                                   updated_at = CURRENT_TIMESTAMP
+                               WHERE id = ?""",
+                            (mpesa_receipt, pending["id"]),
+                        )
+                        conn.commit()
+                        return jsonify({
+                            "ResultCode": 0,
+                            "ResultDesc": "Paid but stock requires manual review",
+                        }), 200
+
                 conn.execute(
-                    """INSERT INTO sales (user_id, product_id, quantity, total_amount, matched)
+                    """INSERT INTO sales
+                       (user_id, product_id, quantity, total_amount, matched)
                        VALUES (?, ?, ?, ?, 1)""",
-                    (pending["user_id"], pending["product_id"], pending["quantity"], amount_paid)
+                    (
+                        pending["user_id"],
+                        pending["product_id"],
+                        pending["quantity"],
+                        amount_paid,
+                    ),
                 )
+
                 conn.execute(
-                    "UPDATE products SET stock = stock - ? WHERE id = ?",
-                    (pending["quantity"], pending["product_id"])
-                )
-                conn.execute(
-                    """INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount, matched)
+                    """INSERT INTO mpesa_transactions
+                       (user_id, mpesa_code, sender_name, amount, matched)
                        VALUES (?, ?, ?, ?, 1)""",
-                    (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
+                    (
+                        pending["user_id"],
+                        mpesa_receipt,
+                        pending["phone_number"],
+                        amount_paid,
+                    ),
                 )
-            # If stock ran out in the meantime, fall through: payment is still logged
-            # via pending_stk_requests, but no sale/stock change happens automatically.
-            # (Worth reviewing manually in that edge case.)
+            else:
+                conn.execute(
+                    """INSERT OR IGNORE INTO mpesa_transactions
+                       (user_id, mpesa_code, sender_name, amount)
+                       VALUES (?, ?, ?, ?)""",
+                    (
+                        pending["user_id"],
+                        mpesa_receipt,
+                        pending["phone_number"],
+                        amount_paid,
+                    ),
+                )
+
+            conn.execute(
+                """UPDATE pending_stk_requests
+                   SET status = 'success', mpesa_receipt = ?,
+                       stock_reserved = 0, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (mpesa_receipt, pending["id"]),
+            )
         else:
-            # Generic payment request (not tied to a sale) — log it as before.
-            existing = conn.execute(
-                "SELECT id FROM mpesa_transactions WHERE mpesa_code = ?", (mpesa_receipt,)
-            ).fetchone()
-
-            if not existing:
+            # Payment failed, timed out, or was cancelled: put reserved stock back.
+            if (
+                pending["stock_reserved"] == 1
+                and pending["product_id"]
+                and pending["quantity"]
+            ):
                 conn.execute(
-                    "INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount) VALUES (?, ?, ?, ?)",
-                    (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
+                    """UPDATE products
+                       SET stock = stock + ?
+                       WHERE id = ? AND user_id = ?""",
+                    (
+                        pending["quantity"],
+                        pending["product_id"],
+                        pending["user_id"],
+                    ),
                 )
-    else:
-        conn.execute(
-            "UPDATE pending_stk_requests SET status = 'failed' WHERE checkout_request_id = ?",
-            (checkout_request_id,)
-        )
 
-    conn.commit()
-    conn.close()
+            conn.execute(
+                """UPDATE pending_stk_requests
+                   SET status = 'failed', stock_reserved = 0,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (pending["id"],),
+            )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        # Returning a non-success result encourages M-Pesa to retry the callback.
+        return jsonify({
+            "ResultCode": 1,
+            "ResultDesc": "Callback processing failed",
+        }), 200
+    finally:
+        conn.close()
 
     return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
 
