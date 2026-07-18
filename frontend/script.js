@@ -1,4 +1,4 @@
-const API_URL = "http://127.0.0.1:8080";
+const API_URL = "https://duka-manager.onrender.com";
 
 // ---- AUTH STATE ----
 let authMode = "login"; // or "signup"
