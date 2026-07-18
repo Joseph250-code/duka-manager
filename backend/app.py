@@ -59,6 +59,22 @@ def current_user_id():
     return session["user_id"]
 
 
+def normalize_phone(phone_number):
+    """Returns a 2547XXXXXXXX formatted number, or None if invalid."""
+    if not isinstance(phone_number, str) or not phone_number.strip():
+        return None
+    phone_number = phone_number.strip()
+
+    if phone_number.startswith("0") and len(phone_number) == 10:
+        phone_number = "254" + phone_number[1:]
+    elif phone_number.startswith("+254"):
+        phone_number = phone_number[1:]
+
+    if phone_number.startswith("254") and len(phone_number) == 12 and phone_number.isdigit():
+        return phone_number
+    return None
+
+
 # ---- AUTH ----
 @app.route("/signup", methods=["POST"])
 def signup():
@@ -300,6 +316,78 @@ def record_sale():
     }), 201
 
 
+@app.route("/sales/request-payment", methods=["POST"])
+def request_sale_payment():
+    """
+    Instead of recording the sale immediately, this validates stock,
+    sends an STK Push for the exact sale amount, and stores a pending
+    request tied to the product/quantity. The sale itself only gets
+    recorded once the M-Pesa callback confirms payment (see /mpesa-callback).
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    product_id = data.get("product_id")
+    quantity = data.get("quantity")
+    phone_number = normalize_phone(data.get("phone_number"))
+
+    if not isinstance(product_id, int) or isinstance(product_id, bool) or product_id <= 0:
+        return jsonify({"error": "product_id must be a positive integer"}), 400
+
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+        return jsonify({"error": "quantity must be a positive integer"}), 400
+
+    if quantity > 100000:
+        return jsonify({"error": "quantity is unrealistically large"}), 400
+
+    if not phone_number:
+        return jsonify({"error": "phone_number must be a valid Kenyan number (e.g. 0712345678)"}), 400
+
+    conn = get_connection()
+    product = conn.execute(
+        "SELECT * FROM products WHERE id = ? AND user_id = ?", (product_id, current_user_id())
+    ).fetchone()
+
+    if not product:
+        conn.close()
+        return jsonify({"error": "Product not found"}), 404
+
+    if product["stock"] < quantity:
+        conn.close()
+        return jsonify({"error": "Not enough stock available"}), 400
+
+    total_amount = product["price"] * quantity
+
+    try:
+        result = trigger_stk_push(phone_number, total_amount)
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": f"Failed to reach M-Pesa: {str(e)}"}), 502
+
+    checkout_request_id = result.get("CheckoutRequestID")
+    response_code = result.get("ResponseCode")
+
+    if response_code != "0" or not checkout_request_id:
+        conn.close()
+        return jsonify({"error": result.get("errorMessage", "M-Pesa rejected the request")}), 400
+
+    conn.execute(
+        """INSERT INTO pending_stk_requests
+           (user_id, checkout_request_id, phone_number, amount, product_id, quantity)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (current_user_id(), checkout_request_id, phone_number, total_amount, product_id, quantity)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "message": f"Payment prompt sent for {product['name']} — waiting for customer to pay",
+        "checkout_request_id": checkout_request_id,
+        "amount": total_amount
+    }), 201
+
+
 @app.route("/mpesa", methods=["GET"])
 def get_mpesa_transactions():
     conn = get_connection()
@@ -419,20 +507,10 @@ def stk_push():
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
 
-    phone_number = data.get("phone_number")
+    phone_number = normalize_phone(data.get("phone_number"))
     amount = data.get("amount")
 
-    if not isinstance(phone_number, str) or not phone_number.strip():
-        return jsonify({"error": "phone_number must be a non-empty string"}), 400
-    phone_number = phone_number.strip()
-
-    # Normalize common formats to 2547XXXXXXXX
-    if phone_number.startswith("0") and len(phone_number) == 10:
-        phone_number = "254" + phone_number[1:]
-    elif phone_number.startswith("+254"):
-        phone_number = phone_number[1:]
-
-    if not (phone_number.startswith("254") and len(phone_number) == 12 and phone_number.isdigit()):
+    if not phone_number:
         return jsonify({"error": "phone_number must be a valid Kenyan number (e.g. 0712345678)"}), 400
 
     if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
@@ -499,15 +577,41 @@ def mpesa_callback():
             (mpesa_receipt, checkout_request_id)
         )
 
-        existing = conn.execute(
-            "SELECT id FROM mpesa_transactions WHERE mpesa_code = ?", (mpesa_receipt,)
-        ).fetchone()
+        if pending["product_id"] and pending["quantity"]:
+            # This request was tied to a specific sale — record it directly, already matched.
+            product = conn.execute(
+                "SELECT * FROM products WHERE id = ?", (pending["product_id"],)
+            ).fetchone()
 
-        if not existing:
-            conn.execute(
-                "INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount) VALUES (?, ?, ?, ?)",
-                (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
-            )
+            if product and product["stock"] >= pending["quantity"]:
+                conn.execute(
+                    """INSERT INTO sales (user_id, product_id, quantity, total_amount, matched)
+                       VALUES (?, ?, ?, ?, 1)""",
+                    (pending["user_id"], pending["product_id"], pending["quantity"], amount_paid)
+                )
+                conn.execute(
+                    "UPDATE products SET stock = stock - ? WHERE id = ?",
+                    (pending["quantity"], pending["product_id"])
+                )
+                conn.execute(
+                    """INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount, matched)
+                       VALUES (?, ?, ?, ?, 1)""",
+                    (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
+                )
+            # If stock ran out in the meantime, fall through: payment is still logged
+            # via pending_stk_requests, but no sale/stock change happens automatically.
+            # (Worth reviewing manually in that edge case.)
+        else:
+            # Generic payment request (not tied to a sale) — log it as before.
+            existing = conn.execute(
+                "SELECT id FROM mpesa_transactions WHERE mpesa_code = ?", (mpesa_receipt,)
+            ).fetchone()
+
+            if not existing:
+                conn.execute(
+                    "INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount) VALUES (?, ?, ?, ?)",
+                    (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
+                )
     else:
         conn.execute(
             "UPDATE pending_stk_requests SET status = 'failed' WHERE checkout_request_id = ?",
