@@ -17,9 +17,12 @@ if not SECRET_KEY:
     )
 
 app.secret_key = SECRET_KEY
+
+app.config["SESSION_COOKIE_NAME"] = "duka_session"
 app.config["SESSION_COOKIE_SAMESITE"] = "None"
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_PARTITIONED"] = True
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
 
 ALLOWED_ORIGIN = "https://duka-manager-frontend.onrender.com"
