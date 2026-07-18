@@ -32,7 +32,7 @@ RATE_LIMIT = 30
 RATE_WINDOW = 10
 request_log = defaultdict(list)
 
-PUBLIC_ROUTES = {"/signup", "/login"}
+PUBLIC_ROUTES = {"/signup", "/login", "/test-mpesa-token"}
 
 @app.before_request
 def rate_limit_and_auth():
