@@ -76,6 +76,15 @@ def init_db():
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER")
             print(f"Added user_id column to {table}")
 
+    # ---- Migration: add product_id and quantity to pending_stk_requests ----
+    if not _column_exists(cursor, "pending_stk_requests", "product_id"):
+        cursor.execute("ALTER TABLE pending_stk_requests ADD COLUMN product_id INTEGER")
+        print("Added product_id column to pending_stk_requests")
+
+    if not _column_exists(cursor, "pending_stk_requests", "quantity"):
+        cursor.execute("ALTER TABLE pending_stk_requests ADD COLUMN quantity INTEGER")
+        print("Added quantity column to pending_stk_requests")
+
     conn.commit()
     conn.close()
     print("Database initialized successfully.")
