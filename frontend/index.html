@@ -92,12 +92,16 @@
         <!-- SALES -->
         <section class="tab-content" id="sales-tab">
             <div class="card">
-                <h2>Record a sale</h2>
+                <h2>Sell with M-Pesa</h2>
+                <p class="muted">Choose the item and quantity, then enter the customer's phone number. The sale is recorded only after M-Pesa confirms payment.</p>
                 <form id="saleForm" class="row-form">
                     <select id="saleProduct" required></select>
                     <input type="number" id="saleQuantity" placeholder="Quantity" min="1" required>
-                    <button type="submit">Record sale</button>
+                    <input type="tel" id="salePhone" placeholder="Phone (e.g. 0712345678)" inputmode="tel" required>
+                    <button type="submit" id="saleSubmitBtn">Send M-Pesa prompt</button>
                 </form>
+                <p class="muted">Total: <strong class="mono" id="saleTotal">KES 0.00</strong></p>
+                <p class="muted" id="saleStatus"></p>
             </div>
             <div class="card">
                 <h2>Sales ledger</h2>
@@ -132,7 +136,7 @@
         <section class="tab-content" id="stkpush-tab">
             <div class="card">
                 <h2>Request payment from customer</h2>
-                <p class="muted">Enter the customer's phone number and the amount — they'll get a prompt on their phone to enter their M-Pesa PIN.</p>
+                <p class="muted">Use this for a general payment that is not tied to a stock sale.</p>
                 <form id="stkForm" class="row-form">
                     <input type="text" id="stkPhone" placeholder="Phone (e.g. 0712345678)" required>
                     <input type="number" id="stkAmount" placeholder="Amount (KES)" step="0.01" required>
