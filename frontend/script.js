@@ -96,7 +96,19 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
     document.getElementById("authForm").reset();
 });
 
-// ---- LIVE CLOCK ----
+// ---- LIVE CLOCK & TIMESTAMP HELPER ----
+function toLocalTime(sqliteTimestamp) {
+    // SQLite stores CURRENT_TIMESTAMP in UTC with a space instead of "T" —
+    // convert to a real Date so the browser can show it in local time.
+    const isoLike = sqliteTimestamp.replace(" ", "T") + "Z";
+    const d = new Date(isoLike);
+    if (isNaN(d)) return sqliteTimestamp; // fallback if parsing fails
+    return d.toLocaleString("en-KE", {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit"
+    });
+}
+
 function tickClock() {
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-KE", { year: "numeric", month: "long", day: "numeric" });
@@ -256,7 +268,7 @@ async function loadSales() {
             <td>${s.name}</td>
             <td class="mono">${s.quantity}</td>
             <td class="mono">${s.total_amount.toFixed(2)}</td>
-            <td class="mono">${s.sale_time}</td>
+            <td class="mono">${toLocalTime(s.sale_time)}</td>
             <td>${s.matched
                 ? '<span class="stamp stamp-matched">Matched</span>'
                 : '<span class="stamp stamp-unmatched">Unmatched</span>'}</td>
@@ -302,7 +314,7 @@ async function loadMpesa() {
             <td class="mono">${t.mpesa_code}</td>
             <td>${t.sender_name || "—"}</td>
             <td class="mono">${t.amount.toFixed(2)}</td>
-            <td class="mono">${t.transaction_time}</td>
+            <td class="mono">${toLocalTime(t.transaction_time)}</td>
             <td>${t.matched
                 ? '<span class="stamp stamp-matched">Matched</span>'
                 : '<span class="stamp stamp-unmatched">Unmatched</span>'}</td>
@@ -369,7 +381,7 @@ async function runReconcile() {
     if (data.unmatched_sales.length > 0) {
         html += `<div class="recon-section"><h3>Sales with no matching payment</h3><table><thead><tr><th>Item</th><th>Qty</th><th>Amount</th><th>Time</th></tr></thead><tbody>`;
         data.unmatched_sales.forEach(s => {
-            html += `<tr><td>${s.name}</td><td class="mono">${s.quantity}</td><td class="mono">KES ${s.total_amount.toFixed(2)}</td><td class="mono">${s.sale_time}</td></tr>`;
+            html += `<tr><td>${s.name}</td><td class="mono">${s.quantity}</td><td class="mono">KES ${s.total_amount.toFixed(2)}</td><td class="mono">${toLocalTime(s.sale_time)}</td></tr>`;
         });
         html += `</tbody></table></div>`;
     }
@@ -377,7 +389,7 @@ async function runReconcile() {
     if (data.unmatched_mpesa.length > 0) {
         html += `<div class="recon-section"><h3>Payments with no matching sale</h3><table><thead><tr><th>Code</th><th>Sender</th><th>Amount</th><th>Time</th></tr></thead><tbody>`;
         data.unmatched_mpesa.forEach(t => {
-            html += `<tr><td class="mono">${t.mpesa_code}</td><td>${t.sender_name || "—"}</td><td class="mono">KES ${t.amount.toFixed(2)}</td><td class="mono">${t.transaction_time}</td></tr>`;
+            html += `<tr><td class="mono">${t.mpesa_code}</td><td>${t.sender_name || "—"}</td><td class="mono">KES ${t.amount.toFixed(2)}</td><td class="mono">${toLocalTime(t.transaction_time)}</td></tr>`;
         });
         html += `</tbody></table></div>`;
     }
