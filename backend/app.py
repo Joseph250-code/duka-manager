@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_connection, init_db
+from mpesa import get_access_token
 import time
 import secrets
 from collections import defaultdict
@@ -410,6 +411,16 @@ def reconcile():
         "unmatched_sales": [dict(s) for s in still_unmatched_sales],
         "unmatched_mpesa": [dict(t) for t in still_unmatched_mpesa]
     })
+
+
+# ---- TEMPORARY: M-Pesa OAuth test route (remove after confirming it works) ----
+@app.route("/test-mpesa-token", methods=["GET"])
+def test_mpesa_token():
+    try:
+        token = get_access_token()
+        return jsonify({"access_token": token})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
