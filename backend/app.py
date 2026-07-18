@@ -8,7 +8,8 @@ from collections import defaultdict
 app = Flask(__name__)
 
 app.secret_key = secrets.token_hex(32)
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
 
