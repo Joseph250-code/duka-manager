@@ -1,9 +1,15 @@
 const API_URL = "https://duka-manager.onrender.com";
 
-// ---- AUTH STATE ----
-let authMode = "login"; // or "signup"
+let authMode = "login";
 let productsCache = [];
+let salesCache = [];
+let mpesaCache = [];
+let paymentsCache = [];
 let clockTimer = null;
+let paymentPollTimer = null;
+
+let activeCheckoutRequestId =
+    localStorage.getItem("dukaActiveCheckoutId") || null;
 
 const authWrap = document.getElementById("authWrap");
 const ledgerApp = document.getElementById("ledgerApp");
@@ -14,894 +20,1776 @@ const authToggleText = document.getElementById("authToggleText");
 const authToggleLink = document.getElementById("authToggleLink");
 const authError = document.getElementById("authError");
 
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+
 function setAuthMode(mode) {
     authMode = mode;
 
+    const passwordInput =
+        document.getElementById("authPassword");
+
     if (mode === "login") {
-        authModeLabel.textContent = "Log in to your ledger";
-        authSubmitBtn.textContent = "Log In";
-        authToggleText.textContent = "Don't have an account?";
-        authToggleLink.textContent = "Sign up";
+        authModeLabel.textContent =
+            "Log in to your ledger";
+
+        authSubmitBtn.textContent =
+            "Log In";
+
+        authToggleText.textContent =
+            "Don't have an account?";
+
+        authToggleLink.textContent =
+            "Sign up";
+
+        passwordInput.autocomplete =
+            "current-password";
     } else {
-        authModeLabel.textContent = "Create your ledger account";
-        authSubmitBtn.textContent = "Sign Up";
-        authToggleText.textContent = "Already have an account?";
-        authToggleLink.textContent = "Log in";
+        authModeLabel.textContent =
+            "Create your ledger account";
+
+        authSubmitBtn.textContent =
+            "Sign Up";
+
+        authToggleText.textContent =
+            "Already have an account?";
+
+        authToggleLink.textContent =
+            "Log in";
+
+        passwordInput.autocomplete =
+            "new-password";
     }
 
     authError.textContent = "";
 }
 
-authToggleLink.addEventListener("click", (e) => {
-    e.preventDefault();
-    setAuthMode(authMode === "login" ? "signup" : "login");
-});
 
-authForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    authError.textContent = "";
+authToggleLink.addEventListener(
+    "click",
+    (event) => {
+        event.preventDefault();
 
-    const username = document.getElementById("authUsername").value;
-    const password = document.getElementById("authPassword").value;
-    const endpoint = authMode === "login" ? "/login" : "/signup";
-
-    try {
-        const res = await fetch(`${API_URL}${endpoint}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            credentials: "include",
-            body: JSON.stringify({
-                username,
-                password
-            })
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-            authError.textContent = data.error || "Something went wrong";
-            return;
-        }
-
-        showApp(data.username);
-    } catch (err) {
-        authError.textContent = "Can't reach the backend — is it running?";
+        setAuthMode(
+            authMode === "login"
+                ? "signup"
+                : "login"
+        );
     }
-});
+);
+
+
+authForm.addEventListener(
+    "submit",
+    async (event) => {
+        event.preventDefault();
+
+        authError.textContent = "";
+
+        const username = document
+            .getElementById("authUsername")
+            .value
+            .trim();
+
+        const password =
+            document.getElementById(
+                "authPassword"
+            ).value;
+
+        const endpoint =
+            authMode === "login"
+                ? "/login"
+                : "/signup";
+
+        authSubmitBtn.disabled = true;
+
+        authSubmitBtn.textContent =
+            authMode === "login"
+                ? "Logging in..."
+                : "Creating account...";
+
+        try {
+            const response = await fetch(
+                `${API_URL}${endpoint}`,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    credentials: "include",
+
+                    body: JSON.stringify({
+                        username,
+                        password
+                    })
+                }
+            );
+
+            const data =
+                await response
+                    .json()
+                    .catch(() => ({}));
+
+            if (!response.ok) {
+                authError.textContent =
+                    data.error ||
+                    "Something went wrong";
+
+                return;
+            }
+
+            authForm.reset();
+
+            await showApp(
+                data.username
+            );
+        } catch (error) {
+            authError.textContent =
+                "Can't reach the backend. Please try again.";
+        } finally {
+            authSubmitBtn.disabled = false;
+
+            authSubmitBtn.textContent =
+                authMode === "login"
+                    ? "Log In"
+                    : "Sign Up";
+        }
+    }
+);
+
 
 async function checkExistingSession() {
     try {
-        const res = await fetch(`${API_URL}/me`, {
-            credentials: "include"
-        });
+        const response = await fetch(
+            `${API_URL}/me`,
+            {
+                credentials: "include"
+            }
+        );
 
-        const data = await res.json();
+        if (!response.ok) {
+            authWrap.style.display =
+                "flex";
+
+            return;
+        }
+
+        const data =
+            await response.json();
 
         if (data.username) {
-            showApp(data.username);
+            await showApp(
+                data.username
+            );
         } else {
-            authWrap.style.display = "flex";
+            authWrap.style.display =
+                "flex";
         }
-    } catch (err) {
-        authWrap.style.display = "flex";
+    } catch (error) {
+        authWrap.style.display =
+            "flex";
     }
 }
 
-function showApp(username) {
-    authWrap.style.display = "none";
-    ledgerApp.style.display = "block";
-    document.getElementById("loggedInAs").textContent = username;
+
+async function showApp(username) {
+    authWrap.style.display =
+        "none";
+
+    ledgerApp.style.display =
+        "block";
+
+    document.getElementById(
+        "loggedInAs"
+    ).textContent = username;
 
     tickClock();
 
-    if (clockTimer) {
-        clearInterval(clockTimer);
-    }
+    clearInterval(
+        clockTimer
+    );
 
-    clockTimer = setInterval(tickClock, 1000);
+    clockTimer =
+        setInterval(
+            tickClock,
+            1000
+        );
 
     renderLedgerNumber();
-    loadProducts();
-    loadSales();
-    loadMpesa().then(updateUnmatchedTotal);
+
+    await refreshDashboard();
+
+    if (activeCheckoutRequestId) {
+        startPaymentPolling(
+            activeCheckoutRequestId
+        );
+
+        return;
+    }
+
+    const pendingPayment =
+        paymentsCache.find(
+            (payment) =>
+                [
+                    "initiating",
+                    "pending"
+                ].includes(
+                    payment.status
+                )
+        );
+
+    if (pendingPayment) {
+        activeCheckoutRequestId =
+            pendingPayment
+                .checkout_request_id;
+
+        localStorage.setItem(
+            "dukaActiveCheckoutId",
+            activeCheckoutRequestId
+        );
+
+        startPaymentPolling(
+            activeCheckoutRequestId
+        );
+    }
 }
 
-document.getElementById("logoutBtn").addEventListener("click", async () => {
-    await fetch(`${API_URL}/logout`, {
-        method: "POST",
-        credentials: "include"
-    });
 
-    ledgerApp.style.display = "none";
-    authWrap.style.display = "flex";
+document
+    .getElementById("logoutBtn")
+    .addEventListener(
+        "click",
+        async () => {
+            await fetch(
+                `${API_URL}/logout`,
+                {
+                    method: "POST",
+                    credentials: "include"
+                }
+            ).catch(() => null);
 
-    setAuthMode("login");
-    document.getElementById("authForm").reset();
+            stopPaymentPolling();
 
-    if (clockTimer) {
-        clearInterval(clockTimer);
-        clockTimer = null;
+            clearInterval(
+                clockTimer
+            );
+
+            clockTimer = null;
+
+            ledgerApp.style.display =
+                "none";
+
+            authWrap.style.display =
+                "flex";
+
+            authForm.reset();
+
+            setAuthMode("login");
+        }
+    );
+
+
+function toDate(sqliteTimestamp) {
+    if (!sqliteTimestamp) {
+        return null;
     }
-});
 
-// ---- LIVE CLOCK & TIMESTAMP HELPER ----
+    const normalized =
+        sqliteTimestamp.includes("T")
+            ? sqliteTimestamp
+            : `${sqliteTimestamp.replace(
+                " ",
+                "T"
+            )}Z`;
+
+    const date =
+        new Date(normalized);
+
+    return Number.isNaN(
+        date.getTime()
+    )
+        ? null
+        : date;
+}
+
+
 function toLocalTime(sqliteTimestamp) {
-    const isoLike = sqliteTimestamp.replace(" ", "T") + "Z";
-    const d = new Date(isoLike);
+    const date =
+        toDate(sqliteTimestamp);
 
-    if (isNaN(d)) {
-        return sqliteTimestamp;
+    if (!date) {
+        return (
+            sqliteTimestamp ||
+            "—"
+        );
     }
 
-    return d.toLocaleString("en-KE", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-    });
+    return date.toLocaleString(
+        "en-KE",
+        {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+        }
+    );
 }
+
+
+function isToday(sqliteTimestamp) {
+    const date =
+        toDate(sqliteTimestamp);
+
+    if (!date) {
+        return false;
+    }
+
+    const today =
+        new Date();
+
+    return (
+        date.getFullYear() ===
+            today.getFullYear() &&
+
+        date.getMonth() ===
+            today.getMonth() &&
+
+        date.getDate() ===
+            today.getDate()
+    );
+}
+
 
 function tickClock() {
-    const now = new Date();
+    const now =
+        new Date();
 
-    const dateStr = now.toLocaleDateString("en-KE", {
-        year: "numeric",
-        month: "long",
-        day: "numeric"
-    });
+    const date =
+        now.toLocaleDateString(
+            "en-KE",
+            {
+                year: "numeric",
+                month: "long",
+                day: "numeric"
+            }
+        );
 
-    const timeStr = now.toLocaleTimeString("en-KE", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-    });
+    const time =
+        now.toLocaleTimeString(
+            "en-KE",
+            {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit"
+            }
+        );
 
-    document.getElementById("todayDate").textContent =
-        `${dateStr} · ${timeStr}`;
+    document.getElementById(
+        "todayDate"
+    ).textContent =
+        `${date} · ${time}`;
 }
+
 
 function formatKes(amount) {
-    return `KES ${Number(amount || 0).toFixed(2)}`;
+    return (
+        `KES ${Number(
+            amount || 0
+        ).toLocaleString(
+            "en-KE",
+            {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }
+        )}`
+    );
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+
+function formatPhone(phone) {
+    const value =
+        String(phone || "");
+
+    if (
+        /^254\d{9}$/.test(
+            value
+        )
+    ) {
+        return (
+            `0${value.slice(3)}`
+        );
+    }
+
+    return value || "—";
 }
 
-// ---- LEDGER NUMBER ----
+
 function getLedgerNumber() {
-    return parseInt(
-        localStorage.getItem("dukaLedgerNumber") || "0",
+    return Number.parseInt(
+        localStorage.getItem(
+            "dukaLedgerNumber"
+        ) || "0",
         10
     );
 }
 
-function bumpLedgerNumber() {
-    const next = getLedgerNumber() + 1;
 
-    localStorage.setItem("dukaLedgerNumber", next);
+function renderLedgerNumber() {
+    document.getElementById(
+        "ledgerNumber"
+    ).textContent =
+        String(
+            getLedgerNumber()
+        ).padStart(
+            3,
+            "0"
+        );
+}
+
+
+function bumpLedgerNumber() {
+    localStorage.setItem(
+        "dukaLedgerNumber",
+        String(
+            getLedgerNumber() + 1
+        )
+    );
+
     renderLedgerNumber();
 }
 
-function renderLedgerNumber() {
-    document.getElementById("ledgerNumber").textContent =
-        String(getLedgerNumber()).padStart(3, "0");
+
+function showToast(
+    message,
+    type = "ok"
+) {
+    const toast =
+        document.createElement(
+            "div"
+        );
+
+    toast.className =
+        `toast toast-${type}`;
+
+    toast.textContent =
+        message;
+
+    document.body.appendChild(
+        toast
+    );
+
+    requestAnimationFrame(
+        () =>
+            toast.classList.add(
+                "show"
+            )
+    );
+
+    setTimeout(
+        () => {
+            toast.classList.remove(
+                "show"
+            );
+
+            setTimeout(
+                () => toast.remove(),
+                300
+            );
+        },
+        2600
+    );
 }
 
-// ---- TOAST ----
-function showToast(message, type = "ok") {
-    const toast = document.createElement("div");
 
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-
-    document.body.appendChild(toast);
-
-    requestAnimationFrame(() => {
-        toast.classList.add("show");
-    });
-
-    setTimeout(() => {
-        toast.classList.remove("show");
-
-        setTimeout(() => {
-            toast.remove();
-        }, 300);
-    }, 2200);
-}
-
-async function apiCall(path, options = {}) {
+async function apiCall(
+    path,
+    options = {},
+    silent = false
+) {
     try {
-        const res = await fetch(`${API_URL}${path}`, {
-            ...options,
-            credentials: "include"
-        });
+        const response =
+            await fetch(
+                `${API_URL}${path}`,
+                {
+                    ...options,
+                    credentials: "include"
+                }
+            );
 
-        if (res.status === 401) {
-            ledgerApp.style.display = "none";
-            authWrap.style.display = "flex";
+        const data =
+            await response
+                .json()
+                .catch(() => ({}));
+
+        if (
+            response.status === 401
+        ) {
+            stopPaymentPolling();
+
+            ledgerApp.style.display =
+                "none";
+
+            authWrap.style.display =
+                "flex";
 
             setAuthMode("login");
 
-            showToast(
-                "Session expired — please log in again",
-                "error"
-            );
+            if (!silent) {
+                showToast(
+                    "Session expired. Please log in again.",
+                    "error"
+                );
+            }
 
             return null;
         }
 
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-
-            showToast(
-                err.error || "Something went wrong",
-                "error"
-            );
+        if (!response.ok) {
+            if (!silent) {
+                showToast(
+                    data.error ||
+                        "Something went wrong",
+                    "error"
+                );
+            }
 
             return null;
         }
 
-        return await res.json();
-    } catch (err) {
-        showToast(
-            "Can't reach the backend — is it running?",
-            "error"
-        );
+        return data;
+    } catch (error) {
+        if (!silent) {
+            showToast(
+                "Can't reach the backend.",
+                "error"
+            );
+        }
 
         return null;
     }
 }
 
-// ---- TAB SWITCHING ----
-const tabBtns = document.querySelectorAll(".tab-btn");
-const tabContents = document.querySelectorAll(".tab-content");
 
-function activateTab(tabName) {
-    tabBtns.forEach((button) => {
-        button.classList.remove("active");
-    });
-
-    tabContents.forEach((content) => {
-        content.classList.remove("active");
-    });
-
-    const selectedButton = document.querySelector(
-        `[data-tab="${tabName}"]`
+const tabButtons =
+    document.querySelectorAll(
+        ".tab-btn"
     );
 
-    if (selectedButton) {
-        selectedButton.classList.add("active");
-    }
+const tabContents =
+    document.querySelectorAll(
+        ".tab-content"
+    );
 
-    const panel = document.getElementById(`${tabName}-tab`);
 
-    if (!panel) {
-        return;
-    }
+function activateTab(tabName) {
+    tabButtons.forEach(
+        (button) => {
+            button.classList.toggle(
+                "active",
+                button.dataset.tab ===
+                    tabName
+            );
+        }
+    );
 
-    panel.classList.remove("active");
-    void panel.offsetWidth;
-    panel.classList.add("active");
+    tabContents.forEach(
+        (section) => {
+            section.classList.toggle(
+                "active",
+                section.id ===
+                    `${tabName}-tab`
+            );
+        }
+    );
 }
 
-tabBtns.forEach((button) => {
-    button.addEventListener("click", () => {
-        activateTab(button.dataset.tab);
-    });
-});
+
+tabButtons.forEach(
+    (button) => {
+        button.addEventListener(
+            "click",
+            () => {
+                activateTab(
+                    button.dataset.tab
+                );
+
+                if (
+                    button.dataset.tab ===
+                    "mpesa"
+                ) {
+                    loadPayments();
+                    loadMpesa();
+                }
+            }
+        );
+    }
+);
+
 
 function flashRow(row) {
-    row.classList.add("row-new");
-
-    setTimeout(() => {
-        row.classList.remove("row-new");
-    }, 900);
-}
-
-// ---- PRODUCTS ----
-async function loadProducts() {
-    const products = await apiCall("/products");
-
-    if (!products) {
+    if (!row) {
         return;
     }
 
-    productsCache = products;
+    row.classList.add(
+        "row-new"
+    );
 
-    const body = document.getElementById("productsBody");
+    setTimeout(
+        () =>
+            row.classList.remove(
+                "row-new"
+            ),
+        900
+    );
+}
+
+
+async function refreshDashboard() {
+    await Promise.all([
+        loadProducts(),
+        loadSales(),
+        loadMpesa(),
+        loadPayments()
+    ]);
+
+    updateUnmatchedTotal();
+}
+
+
+// ==========================================================
+// PRODUCTS
+// ==========================================================
+
+async function loadProducts() {
+    const products =
+        await apiCall(
+            "/products"
+        );
+
+    if (!products) {
+        return null;
+    }
+
+    productsCache =
+        products;
+
+    const body =
+        document.getElementById(
+            "productsBody"
+        );
 
     body.innerHTML = "";
 
-    let totalStockCount = 0;
+    if (!products.length) {
+        body.innerHTML =
+            '<tr><td colspan="4">No stock entries yet.</td></tr>';
+    }
 
-    products.forEach((product) => {
-        totalStockCount += product.stock;
+    let totalStock = 0;
 
-        const row = document.createElement("tr");
+    products.forEach(
+        (product) => {
+            totalStock +=
+                Number(
+                    product.stock || 0
+                );
 
-        row.innerHTML = `
-            <td>${product.name}</td>
-            <td class="mono">${product.price.toFixed(2)}</td>
-            <td class="mono">${product.stock}</td>
-            <td>
-                <button
-                    class="del-btn"
-                    data-id="${product.id}"
-                >
-                    Remove
-                </button>
-            </td>
-        `;
+            const row =
+                document.createElement(
+                    "tr"
+                );
 
-        body.appendChild(row);
-    });
+            row.innerHTML = `
+                <td>
+                    ${escapeHtml(
+                        product.name
+                    )}
+                </td>
 
-    document.getElementById("totalStock").textContent =
-        totalStockCount;
+                <td class="mono">
+                    ${formatKes(
+                        product.price
+                    )}
+                </td>
 
-    const saleSelect = document.getElementById("saleProduct");
-    const prevValue = saleSelect.value;
+                <td class="mono">
+                    ${product.stock}
+                </td>
 
-    saleSelect.innerHTML = products.length
-        ? products
-            .map(
-                (product) =>
-                    `<option value="${product.id}">
-                        ${product.name} (${product.stock} left)
-                    </option>`
-            )
-            .join("")
-        : '<option value="">No products available</option>';
+                <td>
+                    <button
+                        class="del-btn"
+                        data-id="${product.id}"
+                    >
+                        Remove
+                    </button>
+                </td>
+            `;
+
+            body.appendChild(row);
+        }
+    );
+
+    document.getElementById(
+        "totalStock"
+    ).textContent =
+        totalStock;
+
+    const saleSelect =
+        document.getElementById(
+            "saleProduct"
+        );
+
+    const previousValue =
+        saleSelect.value;
+
+    saleSelect.innerHTML =
+        products.length
+            ? products
+                .map(
+                    (product) => `
+                        <option
+                            value="${product.id}"
+                        >
+                            ${escapeHtml(
+                                product.name
+                            )}
+                            (${product.stock} left)
+                        </option>
+                    `
+                )
+                .join("")
+            : (
+                '<option value="">' +
+                "No products available" +
+                "</option>"
+            );
 
     if (
-        prevValue &&
+        previousValue &&
         products.some(
-            (product) => String(product.id) === prevValue
+            (product) =>
+                String(product.id) ===
+                previousValue
         )
     ) {
-        saleSelect.value = prevValue;
+        saleSelect.value =
+            previousValue;
     }
 
     updateSaleTotal();
 
-    body.querySelectorAll(".del-btn").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const result = await apiCall(
-                `/products/${button.dataset.id}`,
-                {
-                    method: "DELETE"
-                }
-            );
+    body
+        .querySelectorAll(
+            ".del-btn"
+        )
+        .forEach(
+            (button) => {
+                button.addEventListener(
+                    "click",
+                    async () => {
+                        const result =
+                            await apiCall(
+                                `/products/${button.dataset.id}`,
+                                {
+                                    method:
+                                        "DELETE"
+                                }
+                            );
 
-            if (result) {
-                showToast("Removed from stock");
-                loadProducts();
+                        if (result) {
+                            showToast(
+                                "Stock entry removed"
+                            );
+
+                            await loadProducts();
+                        }
+                    }
+                );
             }
-        });
-    });
+        );
+
+    return products;
 }
 
+
 document
-    .getElementById("productForm")
-    .addEventListener("submit", async (e) => {
-        e.preventDefault();
+    .getElementById(
+        "productForm"
+    )
+    .addEventListener(
+        "submit",
+        async (event) => {
+            event.preventDefault();
 
-        const name =
-            document.getElementById("productName").value;
+            const name =
+                document
+                    .getElementById(
+                        "productName"
+                    )
+                    .value
+                    .trim();
 
-        const price = parseFloat(
-            document.getElementById("productPrice").value
-        );
+            const price =
+                Number.parseFloat(
+                    document
+                        .getElementById(
+                            "productPrice"
+                        )
+                        .value
+                );
 
-        const stock = parseInt(
-            document.getElementById("productStock").value,
-            10
-        );
+            const stock =
+                Number.parseInt(
+                    document
+                        .getElementById(
+                            "productStock"
+                        )
+                        .value,
+                    10
+                );
 
-        const result = await apiCall("/products", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                name,
-                price,
-                stock
-            })
-        });
+            const result =
+                await apiCall(
+                    "/products",
+                    {
+                        method: "POST",
 
-        if (result) {
-            e.target.reset();
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
 
-            showToast(`${name} added to stock`);
+                        body:
+                            JSON.stringify({
+                                name,
+                                price,
+                                stock
+                            })
+                    }
+                );
+
+            if (!result) {
+                return;
+            }
+
+            event.target.reset();
+
+            showToast(
+                `${name} added to stock`
+            );
 
             await loadProducts();
 
-            const newRow = [
-                ...document.querySelectorAll("#productsBody tr")
-            ].find(
-                (row) =>
-                    row.firstElementChild?.textContent === name
+            flashRow(
+                document.querySelector(
+                    "#productsBody tr"
+                )
             );
-
-            if (newRow) {
-                flashRow(newRow);
-            }
         }
-    });
+    );
 
-// ---- SALES ----
+
+// ==========================================================
+// SALES
+// ==========================================================
+
 async function loadSales() {
-    const sales = await apiCall("/sales");
+    const sales =
+        await apiCall("/sales");
 
     if (!sales) {
         return null;
     }
 
-    const body = document.getElementById("salesBody");
+    salesCache = sales;
+
+    const body =
+        document.getElementById(
+            "salesBody"
+        );
 
     body.innerHTML = "";
 
+    if (!sales.length) {
+        body.innerHTML =
+            '<tr><td colspan="5">No confirmed sales yet.</td></tr>';
+    }
+
     let totalToday = 0;
 
-    const today = new Date().toISOString().slice(0, 10);
+    sales.forEach(
+        (sale) => {
+            if (
+                isToday(
+                    sale.sale_time
+                )
+            ) {
+                totalToday +=
+                    Number(
+                        sale.total_amount ||
+                            0
+                    );
+            }
 
-    sales.forEach((sale) => {
-        if (sale.sale_time.startsWith(today)) {
-            totalToday += sale.total_amount;
+            const row =
+                document.createElement(
+                    "tr"
+                );
+
+            row.dataset.id =
+                sale.id;
+
+            row.innerHTML = `
+                <td>
+                    ${escapeHtml(
+                        sale.name
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${sale.quantity}
+                </td>
+
+                <td class="mono">
+                    ${formatKes(
+                        sale.total_amount
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${toLocalTime(
+                        sale.sale_time
+                    )}
+                </td>
+
+                <td>
+                    ${
+                        sale.matched
+                            ? (
+                                '<span class="stamp stamp-matched">' +
+                                "Paid" +
+                                "</span>"
+                            )
+                            : (
+                                '<span class="stamp stamp-unmatched">' +
+                                "Unmatched" +
+                                "</span>"
+                            )
+                    }
+                </td>
+            `;
+
+            body.appendChild(row);
         }
+    );
 
-        const row = document.createElement("tr");
-
-        row.dataset.id = sale.id;
-
-        row.innerHTML = `
-            <td>${sale.name}</td>
-            <td class="mono">${sale.quantity}</td>
-            <td class="mono">${sale.total_amount.toFixed(2)}</td>
-            <td class="mono">
-                ${toLocalTime(sale.sale_time)}
-            </td>
-            <td>
-                ${
-                    sale.matched
-                        ? '<span class="stamp stamp-matched">Matched</span>'
-                        : '<span class="stamp stamp-unmatched">Unmatched</span>'
-                }
-            </td>
-        `;
-
-        body.appendChild(row);
-    });
-
-    document.getElementById("totalSales").textContent =
+    document.getElementById(
+        "totalSales"
+    ).textContent =
         formatKes(totalToday);
 
     return sales;
 }
 
+
 function selectedSaleProduct() {
-    const productId = parseInt(
-        document.getElementById("saleProduct").value,
-        10
-    );
+    const productId =
+        Number.parseInt(
+            document
+                .getElementById(
+                    "saleProduct"
+                )
+                .value,
+            10
+        );
 
     return (
         productsCache.find(
-            (product) => product.id === productId
+            (product) =>
+                product.id ===
+                productId
         ) || null
     );
 }
 
+
 function updateSaleTotal() {
-    const product = selectedSaleProduct();
+    const product =
+        selectedSaleProduct();
 
     const quantity =
-        parseInt(
-            document.getElementById("saleQuantity").value,
+        Number.parseInt(
+            document
+                .getElementById(
+                    "saleQuantity"
+                )
+                .value,
             10
         ) || 0;
 
     const total =
-        product && quantity > 0
-            ? product.price * quantity
+        product &&
+        quantity > 0
+            ? product.price *
+                quantity
             : 0;
 
-    document.getElementById("saleTotal").textContent =
+    document.getElementById(
+        "saleTotal"
+    ).textContent =
         formatKes(total);
 }
 
-document
-    .getElementById("saleProduct")
-    .addEventListener("change", updateSaleTotal);
 
 document
-    .getElementById("saleQuantity")
-    .addEventListener("input", updateSaleTotal);
+    .getElementById(
+        "saleProduct"
+    )
+    .addEventListener(
+        "change",
+        updateSaleTotal
+    );
+
 
 document
-    .getElementById("saleForm")
-    .addEventListener("submit", async (e) => {
-        e.preventDefault();
+    .getElementById(
+        "saleQuantity"
+    )
+    .addEventListener(
+        "input",
+        updateSaleTotal
+    );
 
-        const product = selectedSaleProduct();
 
-        const product_id = product ? product.id : 0;
+document
+    .getElementById(
+        "saleForm"
+    )
+    .addEventListener(
+        "submit",
+        async (event) => {
+            event.preventDefault();
 
-        const quantity = parseInt(
-            document.getElementById("saleQuantity").value,
-            10
-        );
+            const product =
+                selectedSaleProduct();
 
-        const phone_number =
-            document
-                .getElementById("salePhone")
-                .value
-                .trim();
+            const quantity =
+                Number.parseInt(
+                    document
+                        .getElementById(
+                            "saleQuantity"
+                        )
+                        .value,
+                    10
+                );
 
-        const statusEl =
-            document.getElementById("saleStatus");
+            const phoneNumber =
+                document
+                    .getElementById(
+                        "salePhone"
+                    )
+                    .value
+                    .trim();
 
-        const submitBtn =
-            document.getElementById("saleSubmitBtn");
+            const statusElement =
+                document.getElementById(
+                    "saleStatus"
+                );
 
-        if (!product) {
-            showToast("Select a valid product", "error");
-            return;
-        }
+            const submitButton =
+                document.getElementById(
+                    "saleSubmitBtn"
+                );
 
-        if (!Number.isInteger(quantity) || quantity <= 0) {
-            showToast("Enter a valid quantity", "error");
-            return;
-        }
+            if (!product) {
+                showToast(
+                    "Select a valid product",
+                    "error"
+                );
 
-        if (quantity > product.stock) {
-            showToast(
-                "Not enough stock available",
-                "error"
-            );
-
-            return;
-        }
-
-        const salesBefore = await apiCall("/sales");
-
-        if (!salesBefore) {
-            return;
-        }
-
-        const highestExistingSaleId =
-            salesBefore.reduce(
-                (max, sale) => Math.max(max, sale.id),
-                0
-            );
-
-        submitBtn.disabled = true;
-        submitBtn.textContent = "Sending prompt...";
-
-        statusEl.textContent =
-            "Reserving stock and contacting M-Pesa...";
-
-        const result = await apiCall(
-            "/sales/request-payment",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    product_id,
-                    quantity,
-                    phone_number
-                })
+                return;
             }
-        );
 
-        if (!result) {
-            submitBtn.disabled = false;
-            submitBtn.textContent =
+            if (
+                !Number.isInteger(
+                    quantity
+                ) ||
+                quantity <= 0
+            ) {
+                showToast(
+                    "Enter a valid quantity",
+                    "error"
+                );
+
+                return;
+            }
+
+            if (
+                quantity >
+                product.stock
+            ) {
+                showToast(
+                    "Not enough stock available",
+                    "error"
+                );
+
+                return;
+            }
+
+            submitButton.disabled =
+                true;
+
+            submitButton.textContent =
+                "Sending prompt...";
+
+            statusElement.textContent =
+                "Reserving stock and contacting M-Pesa...";
+
+            const result =
+                await apiCall(
+                    "/sales/request-payment",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify({
+                                product_id:
+                                    product.id,
+
+                                quantity,
+
+                                phone_number:
+                                    phoneNumber
+                            })
+                    }
+                );
+
+            submitButton.disabled =
+                false;
+
+            submitButton.textContent =
                 "Send M-Pesa prompt";
 
-            statusEl.textContent =
-                "Payment request was not sent.";
+            if (!result) {
+                statusElement.textContent =
+                    "Payment request was not sent.";
 
-            await loadProducts();
+                await loadProducts();
 
-            return;
-        }
-
-        statusEl.textContent =
-            `Prompt sent for ${formatKes(result.amount)}. ` +
-            "Waiting for the customer to enter their M-Pesa PIN...";
-
-        showToast("M-Pesa prompt sent");
-
-        await loadProducts();
-
-        let confirmedSale = null;
-
-        for (let attempt = 0; attempt < 20; attempt++) {
-            await sleep(3000);
-
-            const latestSales =
-                await apiCall("/sales");
-
-            if (!latestSales) {
-                break;
+                return;
             }
 
-            confirmedSale = latestSales.find(
-                (sale) =>
-                    sale.id > highestExistingSaleId &&
-                    sale.product_id === product_id &&
-                    sale.quantity === quantity &&
-                    Math.abs(
-                        sale.total_amount - result.amount
-                    ) < 0.01 &&
-                    sale.matched
+            activeCheckoutRequestId =
+                result
+                    .checkout_request_id;
+
+            localStorage.setItem(
+                "dukaActiveCheckoutId",
+                activeCheckoutRequestId
             );
 
-            if (confirmedSale) {
-                break;
-            }
-        }
-
-        if (confirmedSale) {
-            statusEl.textContent =
-                "Payment confirmed. Sale recorded for " +
-                `${formatKes(confirmedSale.total_amount)}.`;
+            statusElement.textContent =
+                `Prompt sent for ${formatKes(
+                    result.amount
+                )}. ` +
+                "Check the M-Pesa tab for live updates.";
 
             showToast(
-                "Payment confirmed and sale recorded"
+                "M-Pesa prompt sent"
             );
 
-            e.target.reset();
-
             await loadProducts();
-            await loadSales();
-            await loadMpesa();
-            await updateUnmatchedTotal();
 
-            updateSaleTotal();
+            await loadPayments();
 
-            const firstRow =
-                document.querySelector("#salesBody tr");
+            activateTab("mpesa");
 
-            if (firstRow) {
-                flashRow(firstRow);
-            }
-        } else {
-            statusEl.textContent =
-                "Payment has not been confirmed yet. " +
-                "Check the customer's phone and the M-Pesa ledger. " +
-                "Reserved stock is released automatically if " +
-                "payment fails or expires.";
-
-            await loadProducts();
-            await loadSales();
-            await loadMpesa();
-            await updateUnmatchedTotal();
+            startPaymentPolling(
+                activeCheckoutRequestId
+            );
         }
+    );
 
-        submitBtn.disabled = false;
-        submitBtn.textContent =
-            "Send M-Pesa prompt";
-    });
 
-// ---- MPESA ----
+// ==========================================================
+// PAYMENT MESSAGES
+// ==========================================================
+
+function paymentStatusLabel(status) {
+    const labels = {
+        initiating: "Sending",
+        pending: "Pending",
+        success: "Successful",
+        cancelled: "Cancelled",
+        timed_out: "Timed out",
+        expired: "Expired",
+        paid_no_stock: "Review",
+        failed: "Failed"
+    };
+
+    return (
+        labels[status] ||
+        "Unknown"
+    );
+}
+
+
+function paymentStampClass(status) {
+    if (
+        status === "success"
+    ) {
+        return "stamp-matched";
+    }
+
+    if (
+        [
+            "initiating",
+            "pending"
+        ].includes(status)
+    ) {
+        return "";
+    }
+
+    return "stamp-unmatched";
+}
+
+
+function renderLatestPayment(payment) {
+    const status =
+        document.getElementById(
+            "latestPaymentStatus"
+        );
+
+    const message =
+        document.getElementById(
+            "latestPaymentMessage"
+        );
+
+    const details =
+        document.getElementById(
+            "latestPaymentDetails"
+        );
+
+    status.className =
+        "stamp";
+
+    if (!payment) {
+        status.textContent =
+            "No payment";
+
+        message.innerHTML =
+            '<p class="muted">' +
+            "Make a sale to send an M-Pesa prompt." +
+            "</p>";
+
+        details.style.display =
+            "none";
+
+        return;
+    }
+
+    const extraClass =
+        paymentStampClass(
+            payment.status
+        );
+
+    if (extraClass) {
+        status.classList.add(
+            extraClass
+        );
+    }
+
+    status.textContent =
+        paymentStatusLabel(
+            payment.status
+        );
+
+    message.innerHTML =
+        `<p>${escapeHtml(
+            payment.message
+        )}</p>`;
+
+    details.style.display =
+        "grid";
+
+    document.getElementById(
+        "paymentPhone"
+    ).textContent =
+        formatPhone(
+            payment.phone_number
+        );
+
+    document.getElementById(
+        "paymentItem"
+    ).textContent =
+        payment.product_name
+            ? (
+                `${payment.product_name} × ` +
+                `${payment.quantity || 1}`
+            )
+            : "General payment";
+
+    document.getElementById(
+        "paymentAmount"
+    ).textContent =
+        formatKes(
+            payment.amount
+        );
+
+    document.getElementById(
+        "paymentReceipt"
+    ).textContent =
+        payment.mpesa_receipt ||
+        "—";
+}
+
+
+async function loadPayments() {
+    const payments =
+        await apiCall(
+            "/payments"
+        );
+
+    if (!payments) {
+        return null;
+    }
+
+    paymentsCache =
+        payments;
+
+    renderLatestPayment(
+        payments[0] || null
+    );
+
+    const body =
+        document.getElementById(
+            "paymentsBody"
+        );
+
+    body.innerHTML = "";
+
+    if (!payments.length) {
+        body.innerHTML =
+            '<tr><td colspan="6">No payment requests yet.</td></tr>';
+
+        return payments;
+    }
+
+    payments.forEach(
+        (payment) => {
+            const row =
+                document.createElement(
+                    "tr"
+                );
+
+            const stampClass =
+                paymentStampClass(
+                    payment.status
+                );
+
+            row.innerHTML = `
+                <td class="mono">
+                    ${toLocalTime(
+                        payment.created_at
+                    )}
+                </td>
+
+                <td>
+                    ${escapeHtml(
+                        formatPhone(
+                            payment.phone_number
+                        )
+                    )}
+                </td>
+
+                <td>
+                    ${escapeHtml(
+                        payment.product_name ||
+                            "General payment"
+                    )}
+
+                    ${
+                        payment.quantity
+                            ? (
+                                ` × ${payment.quantity}`
+                            )
+                            : ""
+                    }
+                </td>
+
+                <td class="mono">
+                    ${formatKes(
+                        payment.amount
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${escapeHtml(
+                        payment.mpesa_receipt ||
+                            "—"
+                    )}
+                </td>
+
+                <td>
+                    <span
+                        class="stamp ${stampClass}"
+                    >
+                        ${paymentStatusLabel(
+                            payment.status
+                        )}
+                    </span>
+                </td>
+            `;
+
+            body.appendChild(row);
+        }
+    );
+
+    return payments;
+}
+
+
+async function fetchPaymentStatus(
+    checkoutRequestId
+) {
+    return apiCall(
+        `/payments/${encodeURIComponent(
+            checkoutRequestId
+        )}`,
+        {},
+        true
+    );
+}
+
+
+function stopPaymentPolling(
+    clearSavedId = false
+) {
+    if (paymentPollTimer) {
+        clearInterval(
+            paymentPollTimer
+        );
+
+        paymentPollTimer = null;
+    }
+
+    if (clearSavedId) {
+        activeCheckoutRequestId =
+            null;
+
+        localStorage.removeItem(
+            "dukaActiveCheckoutId"
+        );
+    }
+}
+
+
+async function handleTerminalPayment(
+    payment
+) {
+    stopPaymentPolling(true);
+
+    renderLatestPayment(
+        payment
+    );
+
+    await refreshDashboard();
+
+    const statusElement =
+        document.getElementById(
+            "saleStatus"
+        );
+
+    if (
+        payment.status ===
+        "success"
+    ) {
+        statusElement.textContent =
+            `Payment confirmed. Receipt: ` +
+            `${payment.mpesa_receipt}.`;
+
+        document
+            .getElementById(
+                "saleForm"
+            )
+            .reset();
+
+        updateSaleTotal();
+
+        bumpLedgerNumber();
+
+        showToast(
+            "Payment confirmed and sale recorded"
+        );
+
+        flashRow(
+            document.querySelector(
+                "#salesBody tr"
+            )
+        );
+
+        flashRow(
+            document.querySelector(
+                "#mpesaBody tr"
+            )
+        );
+    } else if (
+        payment.status ===
+        "paid_no_stock"
+    ) {
+        statusElement.textContent =
+            "Payment received, but stock needs manual review.";
+
+        showToast(
+            "Payment needs manual review",
+            "error"
+        );
+    } else {
+        statusElement.textContent =
+            payment.message;
+
+        showToast(
+            paymentStatusLabel(
+                payment.status
+            ),
+            "error"
+        );
+    }
+}
+
+
+function startPaymentPolling(
+    checkoutRequestId
+) {
+    stopPaymentPolling();
+
+    activeCheckoutRequestId =
+        checkoutRequestId;
+
+    localStorage.setItem(
+        "dukaActiveCheckoutId",
+        checkoutRequestId
+    );
+
+    const pollOnce =
+        async () => {
+            const payment =
+                await fetchPaymentStatus(
+                    checkoutRequestId
+                );
+
+            if (!payment) {
+                return;
+            }
+
+            renderLatestPayment(
+                payment
+            );
+
+            await loadPayments();
+
+            if (
+                payment.is_terminal
+            ) {
+                await handleTerminalPayment(
+                    payment
+                );
+            }
+        };
+
+    pollOnce();
+
+    paymentPollTimer =
+        setInterval(
+            pollOnce,
+            3000
+        );
+}
+
+
+// ==========================================================
+// CONFIRMED M-PESA TRANSACTIONS
+// ==========================================================
+
 async function loadMpesa() {
-    const transactions = await apiCall("/mpesa");
+    const transactions =
+        await apiCall(
+            "/mpesa"
+        );
 
     if (!transactions) {
         return null;
     }
 
-    const body = document.getElementById("mpesaBody");
+    mpesaCache =
+        transactions;
+
+    const body =
+        document.getElementById(
+            "mpesaBody"
+        );
 
     body.innerHTML = "";
 
-    transactions.forEach((transaction) => {
-        const row = document.createElement("tr");
+    if (!transactions.length) {
+        body.innerHTML =
+            '<tr><td colspan="5">' +
+            "No confirmed M-Pesa transactions yet." +
+            "</td></tr>";
 
-        row.innerHTML = `
-            <td class="mono">
-                ${transaction.mpesa_code}
-            </td>
-            <td>
-                ${transaction.sender_name || "—"}
-            </td>
-            <td class="mono">
-                ${transaction.amount.toFixed(2)}
-            </td>
-            <td class="mono">
-                ${toLocalTime(transaction.transaction_time)}
-            </td>
-            <td>
-                ${
-                    transaction.matched
-                        ? '<span class="stamp stamp-matched">Matched</span>'
-                        : '<span class="stamp stamp-unmatched">Unmatched</span>'
-                }
-            </td>
-        `;
+        return transactions;
+    }
 
-        body.appendChild(row);
-    });
+    transactions.forEach(
+        (transaction) => {
+            const row =
+                document.createElement(
+                    "tr"
+                );
+
+            row.innerHTML = `
+                <td class="mono">
+                    ${escapeHtml(
+                        transaction.mpesa_code
+                    )}
+                </td>
+
+                <td>
+                    ${escapeHtml(
+                        formatPhone(
+                            transaction.sender_name
+                        )
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${formatKes(
+                        transaction.amount
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${toLocalTime(
+                        transaction.transaction_time
+                    )}
+                </td>
+
+                <td>
+                    ${
+                        transaction.matched
+                            ? (
+                                '<span class="stamp stamp-matched">' +
+                                "Matched" +
+                                "</span>"
+                            )
+                            : (
+                                '<span class="stamp stamp-unmatched">' +
+                                "Unmatched" +
+                                "</span>"
+                            )
+                    }
+                </td>
+            `;
+
+            body.appendChild(row);
+        }
+    );
 
     return transactions;
 }
 
-document
-    .getElementById("mpesaForm")
-    .addEventListener("submit", async (e) => {
-        e.preventDefault();
 
-        const mpesa_code =
-            document.getElementById("mpesaCode").value;
-
-        const sender_name =
-            document.getElementById("mpesaSender").value;
-
-        const amount = parseFloat(
-            document.getElementById("mpesaAmount").value
-        );
-
-        const result = await apiCall("/mpesa", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                mpesa_code,
-                sender_name,
-                amount
-            })
-        });
-
-        if (result) {
-            e.target.reset();
-
-            showToast(
-                `Payment logged — ${formatKes(amount)}`
-            );
-
-            await loadMpesa();
-            await updateUnmatchedTotal();
-
-            const firstRow =
-                document.querySelector("#mpesaBody tr");
-
-            if (firstRow) {
-                flashRow(firstRow);
-            }
-        }
-    });
-
-// ---- GENERIC STK PUSH ----
-document
-    .getElementById("stkForm")
-    .addEventListener("submit", async (e) => {
-        e.preventDefault();
-
-        const phone_number =
-            document.getElementById("stkPhone").value;
-
-        const amount = parseFloat(
-            document.getElementById("stkAmount").value
-        );
-
-        const statusEl =
-            document.getElementById("stkStatus");
-
-        const submitBtn =
-            document.getElementById("stkSubmitBtn");
-
-        submitBtn.disabled = true;
-        submitBtn.textContent = "Sending...";
-        statusEl.textContent = "";
-
-        const result = await apiCall("/stkpush", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                phone_number,
-                amount
-            })
-        });
-
-        submitBtn.disabled = false;
-        submitBtn.textContent =
-            "Send payment request";
-
-        if (result) {
-            e.target.reset();
-
-            statusEl.textContent =
-                "Prompt sent — waiting for the customer " +
-                "to enter their PIN...";
-
-            showToast("Payment request sent");
-
-            let attempts = 0;
-
-            const poll = setInterval(async () => {
-                attempts++;
-
-                await loadMpesa();
-                await updateUnmatchedTotal();
-
-                if (attempts >= 6) {
-                    clearInterval(poll);
-                }
-            }, 5000);
-        } else {
-            statusEl.textContent =
-                "Something went wrong sending the request.";
-        }
-    });
-
-// ---- UNMATCHED TOTAL ----
-async function updateUnmatchedTotal() {
-    const sales = await apiCall("/sales");
-    const mpesa = await apiCall("/mpesa");
-
-    if (!sales || !mpesa) {
-        return;
-    }
-
+function updateUnmatchedTotal() {
     const unmatchedSales =
-        sales.filter((sale) => !sale.matched).length;
+        salesCache.filter(
+            (sale) =>
+                !sale.matched
+        ).length;
 
     const unmatchedMpesa =
-        mpesa.filter(
-            (transaction) => !transaction.matched
+        mpesaCache.filter(
+            (transaction) =>
+                !transaction.matched
         ).length;
 
     document.getElementById(
         "totalUnmatched"
     ).textContent =
-        unmatchedSales + unmatchedMpesa;
+        unmatchedSales +
+        unmatchedMpesa;
 }
 
-// ---- RECONCILE ----
+
+// ==========================================================
+// RECONCILIATION
+// ==========================================================
+
 async function runReconcile() {
-    const resultsEl =
-        document.getElementById("reconcileResults");
+    const results =
+        document.getElementById(
+            "reconcileResults"
+        );
 
-    resultsEl.innerHTML =
-        '<p class="muted">Stamping the books…</p>';
+    results.innerHTML =
+        '<p class="muted">' +
+        "Stamping the books…" +
+        "</p>";
 
-    const data = await apiCall("/reconcile", {
-        method: "POST"
-    });
+    const data =
+        await apiCall(
+            "/reconcile",
+            {
+                method: "POST"
+            }
+        );
 
     if (!data) {
-        resultsEl.innerHTML =
+        results.innerHTML =
             '<p class="muted">' +
-            "Reconciliation failed — check the backend." +
+            "Reconciliation failed." +
             "</p>";
 
         return;
     }
 
-    let html =
-        `<div class="recon-summary">` +
-        `${data.matched_count} ` +
-        `entr${data.matched_count === 1 ? "y" : "ies"} ` +
-        `matched this run` +
-        `</div>`;
+    let html = `
+        <div class="recon-summary">
+            ${data.matched_count}
+            entr${
+                data.matched_count === 1
+                    ? "y"
+                    : "ies"
+            }
+            matched this run
+        </div>
+    `;
 
-    if (data.matched_pairs.length > 0) {
+    if (
+        data.matched_pairs.length
+    ) {
         html += `
             <div class="recon-section">
                 <h3>Newly matched</h3>
+
                 <table>
                     <thead>
                         <tr>
@@ -910,38 +1798,46 @@ async function runReconcile() {
                             <th>Amount</th>
                         </tr>
                     </thead>
+
                     <tbody>
-        `;
+                        ${
+                            data.matched_pairs
+                                .map(
+                                    (pair) => `
+                                        <tr>
+                                            <td class="mono">
+                                                #${pair.sale_id}
+                                            </td>
 
-        data.matched_pairs.forEach((pair, index) => {
-            html += `
-                <tr style="animation-delay:${index * 90}ms">
-                    <td class="mono">
-                        #${pair.sale_id}
-                    </td>
-                    <td class="mono">
-                        #${pair.mpesa_id}
-                    </td>
-                    <td class="mono">
-                        <span class="stamp stamp-matched">
-                            ${formatKes(pair.amount)}
-                        </span>
-                    </td>
-                </tr>
-            `;
-        });
+                                            <td class="mono">
+                                                #${pair.mpesa_id}
+                                            </td>
 
-        html += `
+                                            <td class="mono">
+                                                ${formatKes(
+                                                    pair.amount
+                                                )}
+                                            </td>
+                                        </tr>
+                                    `
+                                )
+                                .join("")
+                        }
                     </tbody>
                 </table>
             </div>
         `;
     }
 
-    if (data.unmatched_sales.length > 0) {
+    if (
+        data.unmatched_sales.length
+    ) {
         html += `
             <div class="recon-section">
-                <h3>Sales with no matching payment</h3>
+                <h3>
+                    Sales with no matching payment
+                </h3>
+
                 <table>
                     <thead>
                         <tr>
@@ -951,37 +1847,54 @@ async function runReconcile() {
                             <th>Time</th>
                         </tr>
                     </thead>
+
                     <tbody>
-        `;
+                        ${
+                            data.unmatched_sales
+                                .map(
+                                    (sale) => `
+                                        <tr>
+                                            <td>
+                                                ${escapeHtml(
+                                                    sale.name
+                                                )}
+                                            </td>
 
-        data.unmatched_sales.forEach((sale) => {
-            html += `
-                <tr>
-                    <td>${sale.name}</td>
-                    <td class="mono">
-                        ${sale.quantity}
-                    </td>
-                    <td class="mono">
-                        ${formatKes(sale.total_amount)}
-                    </td>
-                    <td class="mono">
-                        ${toLocalTime(sale.sale_time)}
-                    </td>
-                </tr>
-            `;
-        });
+                                            <td class="mono">
+                                                ${sale.quantity}
+                                            </td>
 
-        html += `
+                                            <td class="mono">
+                                                ${formatKes(
+                                                    sale.total_amount
+                                                )}
+                                            </td>
+
+                                            <td class="mono">
+                                                ${toLocalTime(
+                                                    sale.sale_time
+                                                )}
+                                            </td>
+                                        </tr>
+                                    `
+                                )
+                                .join("")
+                        }
                     </tbody>
                 </table>
             </div>
         `;
     }
 
-    if (data.unmatched_mpesa.length > 0) {
+    if (
+        data.unmatched_mpesa.length
+    ) {
         html += `
             <div class="recon-section">
-                <h3>Payments with no matching sale</h3>
+                <h3>
+                    Payments with no matching sale
+                </h3>
+
                 <table>
                     <thead>
                         <tr>
@@ -991,62 +1904,95 @@ async function runReconcile() {
                             <th>Time</th>
                         </tr>
                     </thead>
+
                     <tbody>
-        `;
+                        ${
+                            data.unmatched_mpesa
+                                .map(
+                                    (transaction) => `
+                                        <tr>
+                                            <td class="mono">
+                                                ${escapeHtml(
+                                                    transaction.mpesa_code
+                                                )}
+                                            </td>
 
-        data.unmatched_mpesa.forEach(
-            (transaction) => {
-                html += `
-                    <tr>
-                        <td class="mono">
-                            ${transaction.mpesa_code}
-                        </td>
-                        <td>
-                            ${transaction.sender_name || "—"}
-                        </td>
-                        <td class="mono">
-                            ${formatKes(transaction.amount)}
-                        </td>
-                        <td class="mono">
-                            ${toLocalTime(
-                                transaction.transaction_time
-                            )}
-                        </td>
-                    </tr>
-                `;
-            }
-        );
+                                            <td>
+                                                ${escapeHtml(
+                                                    transaction.sender_name ||
+                                                        "—"
+                                                )}
+                                            </td>
 
-        html += `
+                                            <td class="mono">
+                                                ${formatKes(
+                                                    transaction.amount
+                                                )}
+                                            </td>
+
+                                            <td class="mono">
+                                                ${toLocalTime(
+                                                    transaction.transaction_time
+                                                )}
+                                            </td>
+                                        </tr>
+                                    `
+                                )
+                                .join("")
+                        }
                     </tbody>
                 </table>
             </div>
         `;
     }
 
-    resultsEl.innerHTML = html;
+    if (
+        !data.matched_pairs.length &&
+        !data.unmatched_sales.length &&
+        !data.unmatched_mpesa.length
+    ) {
+        html +=
+            '<p class="muted">' +
+            "Everything is balanced." +
+            "</p>";
+    }
+
+    results.innerHTML =
+        html;
+
+    await refreshDashboard();
 
     showToast(
-        `${data.matched_count} entries reconciled`
+        "Reconciliation complete"
     );
-
-    bumpLedgerNumber();
-
-    loadSales();
-    loadMpesa();
-    updateUnmatchedTotal();
 }
 
-document
-    .getElementById("reconcileBtn")
-    .addEventListener("click", runReconcile);
 
 document
-    .getElementById("reconcileBtnTop")
-    .addEventListener("click", () => {
-        activateTab("reconcile");
-        runReconcile();
-    });
+    .getElementById(
+        "reconcileBtn"
+    )
+    .addEventListener(
+        "click",
+        runReconcile
+    );
 
-// ---- INITIAL LOAD ----
+
+document
+    .getElementById(
+        "reconcileBtnTop"
+    )
+    .addEventListener(
+        "click",
+        () => {
+            activateTab(
+                "reconcile"
+            );
+
+            runReconcile();
+        }
+    );
+
+
+setAuthMode("login");
 checkExistingSession();

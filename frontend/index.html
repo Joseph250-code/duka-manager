@@ -1,18 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Duka Manager — Ledger</title>
-<link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Duka Manager — Ledger</title>
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
 </head>
+
 <body>
 
-<!-- AUTH SCREEN -->
-<div class="auth-wrap" id="authWrap">
+<!-- ======================================================
+     AUTHENTICATION
+====================================================== -->
+
+<div
+    class="auth-wrap"
+    id="authWrap"
+>
     <div class="auth-card">
-        <h1 class="auth-title">Duka Manager</h1>
-        <p class="auth-sub" id="authModeLabel">Log in to your ledger</p>
+        <h1 class="auth-title">
+            Duka Manager
+        </h1>
+
+        <p
+            class="auth-sub"
+            id="authModeLabel"
+        >
+            Log in to your ledger
+        </p>
 
         <form id="authForm">
             <input
@@ -31,7 +55,10 @@
                 autocomplete="current-password"
             >
 
-            <button type="submit" id="authSubmitBtn">
+            <button
+                type="submit"
+                id="authSubmitBtn"
+            >
                 Log In
             </button>
         </form>
@@ -41,14 +68,25 @@
                 Don't have an account?
             </span>
 
-            <a href="#" id="authToggleLink">
+            <a
+                href="#"
+                id="authToggleLink"
+            >
                 Sign up
             </a>
         </p>
 
-        <p class="auth-error" id="authError"></p>
+        <p
+            class="auth-error"
+            id="authError"
+        ></p>
     </div>
 </div>
+
+
+<!-- ======================================================
+     MAIN APPLICATION
+====================================================== -->
 
 <div
     class="ledger"
@@ -56,14 +94,20 @@
     style="display:none;"
 >
 
+    <!-- HEADER -->
+
     <header class="ledger-head">
         <div class="head-left">
             <h1>Duka Manager</h1>
 
             <p class="ledger-no">
                 Ledger No.
-                <span id="ledgerNumber">001</span>
+                <span id="ledgerNumber">
+                    001
+                </span>
+
                 &middot;
+
                 <span id="todayDate"></span>
             </p>
         </div>
@@ -90,7 +134,13 @@
         </div>
     </header>
 
-    <div class="totals-line" id="summaryGrid">
+
+    <!-- SUMMARY -->
+
+    <div
+        class="totals-line"
+        id="summaryGrid"
+    >
         <div class="total-item">
             <span class="total-label">
                 Stock on hand
@@ -139,7 +189,13 @@
         </div>
     </div>
 
-    <nav class="tabs" id="tabNav">
+
+    <!-- NAVIGATION -->
+
+    <nav
+        class="tabs"
+        id="tabNav"
+    >
         <button
             class="tab-btn active"
             data-tab="products"
@@ -163,22 +219,19 @@
 
         <button
             class="tab-btn"
-            data-tab="stkpush"
-        >
-            Request Payment
-        </button>
-
-        <button
-            class="tab-btn"
             data-tab="reconcile"
         >
             Reconcile
         </button>
     </nav>
 
+
     <main class="page">
 
-        <!-- STOCK -->
+        <!-- ==================================================
+             STOCK
+        =================================================== -->
+
         <section
             class="tab-content active"
             id="products-tab"
@@ -238,7 +291,11 @@
             </div>
         </section>
 
-        <!-- SALES -->
+
+        <!-- ==================================================
+             SALES
+        =================================================== -->
+
         <section
             class="tab-content"
             id="sales-tab"
@@ -247,9 +304,9 @@
                 <h2>Sell with M-Pesa</h2>
 
                 <p class="muted">
-                    Choose the item and quantity, then enter
-                    the customer's phone number. The sale is
-                    recorded only after M-Pesa confirms payment.
+                    Select an item, enter the quantity and
+                    customer phone number. The sale will only
+                    be recorded after M-Pesa confirms payment.
                 </p>
 
                 <form
@@ -287,6 +344,7 @@
 
                 <p class="muted">
                     Total:
+
                     <strong
                         class="mono"
                         id="saleTotal"
@@ -320,54 +378,149 @@
             </div>
         </section>
 
-        <!-- MPESA -->
+
+        <!-- ==================================================
+             M-PESA STATUS AND MESSAGES
+        =================================================== -->
+
         <section
             class="tab-content"
             id="mpesa-tab"
         >
-            <div class="card">
-                <h2>Log M-Pesa payment</h2>
 
-                <form
-                    id="mpesaForm"
-                    class="row-form"
+            <!-- LATEST PAYMENT MESSAGE -->
+
+            <div
+                class="card payment-status-card"
+                id="latestPaymentCard"
+            >
+                <div class="payment-status-heading">
+                    <div>
+                        <h2>Latest payment</h2>
+
+                        <p class="muted">
+                            Payment updates appear here
+                            automatically after a sale request.
+                        </p>
+                    </div>
+
+                    <span
+                        class="stamp"
+                        id="latestPaymentStatus"
+                    >
+                        No payment
+                    </span>
+                </div>
+
+                <div
+                    class="payment-message"
+                    id="latestPaymentMessage"
                 >
-                    <input
-                        type="text"
-                        id="mpesaCode"
-                        placeholder="M-Pesa code"
-                        required
-                    >
+                    <p class="muted">
+                        Make a sale to send an M-Pesa prompt.
+                    </p>
+                </div>
 
-                    <input
-                        type="text"
-                        id="mpesaSender"
-                        placeholder="Sender name"
-                    >
+                <div
+                    class="payment-details"
+                    id="latestPaymentDetails"
+                    style="display:none;"
+                >
+                    <div class="payment-detail">
+                        <span class="total-label">
+                            Customer
+                        </span>
 
-                    <input
-                        type="number"
-                        id="mpesaAmount"
-                        placeholder="Amount (KES)"
-                        step="0.01"
-                        min="0.01"
-                        required
-                    >
+                        <strong
+                            class="mono"
+                            id="paymentPhone"
+                        >
+                            —
+                        </strong>
+                    </div>
 
-                    <button type="submit">
-                        Log payment
-                    </button>
-                </form>
+                    <div class="payment-detail">
+                        <span class="total-label">
+                            Item
+                        </span>
+
+                        <strong id="paymentItem">
+                            —
+                        </strong>
+                    </div>
+
+                    <div class="payment-detail">
+                        <span class="total-label">
+                            Amount
+                        </span>
+
+                        <strong
+                            class="mono"
+                            id="paymentAmount"
+                        >
+                            —
+                        </strong>
+                    </div>
+
+                    <div class="payment-detail">
+                        <span class="total-label">
+                            Receipt
+                        </span>
+
+                        <strong
+                            class="mono"
+                            id="paymentReceipt"
+                        >
+                            —
+                        </strong>
+                    </div>
+                </div>
             </div>
 
+
+            <!-- PAYMENT REQUEST HISTORY -->
+
             <div class="card">
-                <h2>M-Pesa ledger</h2>
+                <h2>Payment messages</h2>
+
+                <p class="muted">
+                    This table shows successful, pending,
+                    cancelled, failed and expired sale payments.
+                </p>
 
                 <table>
                     <thead>
                         <tr>
-                            <th>Code</th>
-                            <th>Sender</th>
+                            <th>Time</th>
+                            <th>Customer</th>
+                            <th>Item</th>
+                            <th>Amount</th>
+                            <th>Receipt</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="paymentsBody">
+                        <tr>
+                            <td colspan="6">
+                                No payment requests yet.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+
+            <!-- CONFIRMED M-PESA TRANSACTIONS -->
+
+            <div class="card">
+                <h2>Confirmed M-Pesa transactions</h2>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Receipt</th>
+                            <th>Customer</th>
                             <th>Amount</th>
                             <th>Time</th>
                             <th>Status</th>
@@ -377,58 +530,14 @@
                     <tbody id="mpesaBody"></tbody>
                 </table>
             </div>
+
         </section>
 
-        <!-- REQUEST PAYMENT -->
-        <section
-            class="tab-content"
-            id="stkpush-tab"
-        >
-            <div class="card">
-                <h2>Request payment from customer</h2>
 
-                <p class="muted">
-                    Use this for a general payment that is not
-                    tied to a stock sale.
-                </p>
+        <!-- ==================================================
+             RECONCILIATION
+        =================================================== -->
 
-                <form
-                    id="stkForm"
-                    class="row-form"
-                >
-                    <input
-                        type="tel"
-                        id="stkPhone"
-                        placeholder="Phone (e.g. 0712345678)"
-                        inputmode="tel"
-                        required
-                    >
-
-                    <input
-                        type="number"
-                        id="stkAmount"
-                        placeholder="Amount (KES)"
-                        step="0.01"
-                        min="0.01"
-                        required
-                    >
-
-                    <button
-                        type="submit"
-                        id="stkSubmitBtn"
-                    >
-                        Send payment request
-                    </button>
-                </form>
-
-                <p
-                    class="muted"
-                    id="stkStatus"
-                ></p>
-            </div>
-        </section>
-
-        <!-- RECONCILE -->
         <section
             class="tab-content"
             id="reconcile-tab"
@@ -437,9 +546,9 @@
                 <h2>Reconciliation</h2>
 
                 <p class="muted">
-                    Match every sale against a logged M-Pesa
-                    payment of the same amount. Anything left
-                    over gets flagged below.
+                    Match every sale against an M-Pesa payment
+                    of the same amount. Any unmatched entries
+                    will be displayed below.
                 </p>
 
                 <button id="reconcileBtn">
@@ -453,6 +562,8 @@
     </main>
 </div>
 
+
 <script src="script.js"></script>
+
 </body>
 </html>
