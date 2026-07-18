@@ -12,7 +12,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
 
-ALLOWED_ORIGIN = "http://127.0.0.1:5500"
+ALLOWED_ORIGIN = "https://duka-manager-frontend.onrender.com"
 
 @app.after_request
 def add_cors_headers(response):
