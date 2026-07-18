@@ -56,6 +56,20 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_stk_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            checkout_request_id TEXT UNIQUE NOT NULL,
+            phone_number TEXT NOT NULL,
+            amount REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            mpesa_receipt TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+
     # ---- Migration: add user_id to existing tables if missing ----
     for table in ("products", "sales", "mpesa_transactions"):
         if not _column_exists(cursor, table, "user_id"):
