@@ -32,7 +32,7 @@ RATE_LIMIT = 30
 RATE_WINDOW = 10
 request_log = defaultdict(list)
 
-PUBLIC_ROUTES = {"/signup", "/login", "/test-mpesa-token"}
+PUBLIC_ROUTES = {"/signup", "/login", "/test-mpesa-token", "/mpesa-callback"}
 
 @app.before_request
 def rate_limit_and_auth():
@@ -461,6 +461,63 @@ def stk_push():
         "message": "Payment prompt sent to customer's phone",
         "checkout_request_id": checkout_request_id
     }), 201
+
+
+@app.route("/mpesa-callback", methods=["POST"])
+def mpesa_callback():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"ResultCode": 1, "ResultDesc": "No data received"}), 200
+
+    stk_callback = data.get("Body", {}).get("stkCallback", {})
+    checkout_request_id = stk_callback.get("CheckoutRequestID")
+    result_code = stk_callback.get("ResultCode")
+
+    if not checkout_request_id:
+        return jsonify({"ResultCode": 1, "ResultDesc": "Missing CheckoutRequestID"}), 200
+
+    conn = get_connection()
+    pending = conn.execute(
+        "SELECT * FROM pending_stk_requests WHERE checkout_request_id = ?",
+        (checkout_request_id,)
+    ).fetchone()
+
+    if not pending:
+        conn.close()
+        return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+
+    if result_code == 0:
+        # Payment succeeded — pull the M-Pesa receipt number and confirmed amount
+        metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+        meta = {item["Name"]: item.get("Value") for item in metadata_items}
+
+        mpesa_receipt = meta.get("MpesaReceiptNumber", f"STK{checkout_request_id[-10:]}")
+        amount_paid = meta.get("Amount", pending["amount"])
+
+        conn.execute(
+            "UPDATE pending_stk_requests SET status = 'success', mpesa_receipt = ? WHERE checkout_request_id = ?",
+            (mpesa_receipt, checkout_request_id)
+        )
+
+        existing = conn.execute(
+            "SELECT id FROM mpesa_transactions WHERE mpesa_code = ?", (mpesa_receipt,)
+        ).fetchone()
+
+        if not existing:
+            conn.execute(
+                "INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount) VALUES (?, ?, ?, ?)",
+                (pending["user_id"], mpesa_receipt, pending["phone_number"], amount_paid)
+            )
+    else:
+        conn.execute(
+            "UPDATE pending_stk_requests SET status = 'failed' WHERE checkout_request_id = ?",
+            (checkout_request_id,)
+        )
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
 
 
 # ---- TEMPORARY: M-Pesa OAuth test route (remove after confirming it works) ----
