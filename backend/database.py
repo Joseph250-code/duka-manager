@@ -7,6 +7,10 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def _column_exists(cursor, table, column):
+    cursor.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cursor.fetchall())
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
@@ -52,9 +56,33 @@ def init_db():
         )
     """)
 
+    # ---- Migration: add user_id to existing tables if missing ----
+    for table in ("products", "sales", "mpesa_transactions"):
+        if not _column_exists(cursor, table, "user_id"):
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER")
+            print(f"Added user_id column to {table}")
+
     conn.commit()
     conn.close()
     print("Database initialized successfully.")
 
+def migrate_existing_data_to_user(username):
+    """One-time helper: assigns any ownerless rows to the given username."""
+    conn = get_connection()
+    user = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    if not user:
+        conn.close()
+        print(f"No user named '{username}' found — nothing migrated.")
+        return
+
+    user_id = user["id"]
+    conn.execute("UPDATE products SET user_id = ? WHERE user_id IS NULL", (user_id,))
+    conn.execute("UPDATE sales SET user_id = ? WHERE user_id IS NULL", (user_id,))
+    conn.execute("UPDATE mpesa_transactions SET user_id = ? WHERE user_id IS NULL", (user_id,))
+    conn.commit()
+    conn.close()
+    print(f"Existing data assigned to '{username}'.")
+
 if __name__ == "__main__":
     init_db()
+    migrate_existing_data_to_user("joe")

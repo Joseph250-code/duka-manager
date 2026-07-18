@@ -256,7 +256,7 @@ tbody tr:hover { background: rgba(196, 143, 46, 0.08); }
 
 .recon-section h3 { font-family: 'Special Elite', monospace; font-size: 14px; margin: 20px 0 8px; }
 
-
+/* ROW FLASH ON NEW ENTRY */
 @keyframes rowFlash {
     0% { background: rgba(196, 143, 46, 0.5); }
     100% { background: transparent; }
@@ -264,7 +264,7 @@ tbody tr:hover { background: rgba(196, 143, 46, 0.08); }
 
 .row-new { animation: rowFlash 0.9s ease; }
 
-
+/* TOASTS */
 .toast {
     position: fixed;
     bottom: 24px;
@@ -300,4 +300,100 @@ tbody tr:hover { background: rgba(196, 143, 46, 0.08); }
     .row-form { flex-direction: column; }
     .row-form input, .row-form select, .row-form button { width: 100%; }
     table { font-size: 12px; }
+}
+
+/* ---- AUTH SCREEN ---- */
+.auth-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-card {
+    background: var(--paper);
+    border: 1px solid var(--rule-strong);
+    box-shadow: 0 2px 0 var(--rule-strong), 0 12px 40px rgba(27, 42, 47, 0.15);
+    border-radius: 6px;
+    padding: 40px 36px;
+    width: 100%;
+    max-width: 360px;
+    text-align: center;
+}
+
+.auth-title {
+    font-family: 'Special Elite', monospace;
+    font-size: 28px;
+    margin: 0 0 6px;
+    color: var(--ink);
+}
+
+.auth-sub {
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin: 0 0 24px;
+}
+
+#authForm { display: flex; flex-direction: column; gap: 14px; }
+
+#authForm input {
+    font-family: 'Work Sans', sans-serif;
+    background: var(--paper);
+    border: none;
+    border-bottom: 2px solid var(--rule-strong);
+    padding: 10px 4px;
+    font-size: 15px;
+    color: var(--ink);
+}
+
+#authForm button {
+    font-family: 'Special Elite', monospace;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 12px;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    border-radius: 3px;
+    margin-top: 6px;
+    transition: background 0.15s ease;
+}
+
+#authForm button:hover { background: var(--stamp-green); }
+
+.auth-toggle { font-size: 13px; color: var(--ink-soft); margin-top: 18px; }
+
+.auth-toggle a {
+    color: var(--stamp-green);
+    font-weight: 600;
+    text-decoration: none;
+    margin-left: 4px;
+}
+
+.auth-toggle a:hover { text-decoration: underline; }
+
+.auth-error {
+    color: var(--stamp-red);
+    font-size: 13px;
+    margin-top: 14px;
+    min-height: 16px;
+}
+
+.logged-in-as {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-right: 12px;
+}
+
+.stamp-btn-logout {
+    border-color: var(--stamp-red);
+    color: var(--stamp-red);
+    margin-right: 8px;
+}
+
+.stamp-btn-logout:hover {
+    background: var(--stamp-red);
+    color: var(--paper);
 }

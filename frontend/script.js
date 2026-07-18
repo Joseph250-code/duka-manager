@@ -1,16 +1,110 @@
 const API_URL = "http://127.0.0.1:8080";
 
+// ---- AUTH STATE ----
+let authMode = "login"; // or "signup"
 
+const authWrap = document.getElementById("authWrap");
+const ledgerApp = document.getElementById("ledgerApp");
+const authForm = document.getElementById("authForm");
+const authModeLabel = document.getElementById("authModeLabel");
+const authSubmitBtn = document.getElementById("authSubmitBtn");
+const authToggleText = document.getElementById("authToggleText");
+const authToggleLink = document.getElementById("authToggleLink");
+const authError = document.getElementById("authError");
+
+function setAuthMode(mode) {
+    authMode = mode;
+    if (mode === "login") {
+        authModeLabel.textContent = "Log in to your ledger";
+        authSubmitBtn.textContent = "Log In";
+        authToggleText.textContent = "Don't have an account?";
+        authToggleLink.textContent = "Sign up";
+    } else {
+        authModeLabel.textContent = "Create your ledger account";
+        authSubmitBtn.textContent = "Sign Up";
+        authToggleText.textContent = "Already have an account?";
+        authToggleLink.textContent = "Log in";
+    }
+    authError.textContent = "";
+}
+
+authToggleLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    setAuthMode(authMode === "login" ? "signup" : "login");
+});
+
+authForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    authError.textContent = "";
+
+    const username = document.getElementById("authUsername").value;
+    const password = document.getElementById("authPassword").value;
+    const endpoint = authMode === "login" ? "/login" : "/signup";
+
+    try {
+        const res = await fetch(`${API_URL}${endpoint}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            authError.textContent = data.error || "Something went wrong";
+            return;
+        }
+
+        showApp(data.username);
+    } catch (err) {
+        authError.textContent = "Can't reach the backend — is it running?";
+    }
+});
+
+async function checkExistingSession() {
+    try {
+        const res = await fetch(`${API_URL}/me`, { credentials: "include" });
+        const data = await res.json();
+        if (data.username) {
+            showApp(data.username);
+        } else {
+            authWrap.style.display = "flex";
+        }
+    } catch (err) {
+        authWrap.style.display = "flex";
+    }
+}
+
+function showApp(username) {
+    authWrap.style.display = "none";
+    ledgerApp.style.display = "block";
+    document.getElementById("loggedInAs").textContent = username;
+    tickClock();
+    setInterval(tickClock, 1000);
+    renderLedgerNumber();
+    loadProducts();
+    loadSales();
+    loadMpesa().then(updateUnmatchedTotal);
+}
+
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+    await fetch(`${API_URL}/logout`, { method: "POST", credentials: "include" });
+    ledgerApp.style.display = "none";
+    authWrap.style.display = "flex";
+    setAuthMode("login");
+    document.getElementById("authForm").reset();
+});
+
+// ---- LIVE CLOCK ----
 function tickClock() {
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-KE", { year: "numeric", month: "long", day: "numeric" });
     const timeStr = now.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     document.getElementById("todayDate").textContent = `${dateStr} · ${timeStr}`;
 }
-tickClock();
-setInterval(tickClock, 1000);
 
-
+// ---- LEDGER NUMBER (increments each time the books are reconciled) ----
 function getLedgerNumber() {
     return parseInt(localStorage.getItem("dukaLedgerNumber") || "0", 10);
 }
@@ -25,9 +119,7 @@ function renderLedgerNumber() {
     document.getElementById("ledgerNumber").textContent = String(getLedgerNumber()).padStart(3, "0");
 }
 
-renderLedgerNumber();
-
-
+// ---- TOAST ----
 function showToast(message, type = "ok") {
     const toast = document.createElement("div");
     toast.className = `toast toast-${type}`;
@@ -42,7 +134,14 @@ function showToast(message, type = "ok") {
 
 async function apiCall(path, options = {}) {
     try {
-        const res = await fetch(`${API_URL}${path}`, options);
+        const res = await fetch(`${API_URL}${path}`, { ...options, credentials: "include" });
+        if (res.status === 401) {
+            ledgerApp.style.display = "none";
+            authWrap.style.display = "flex";
+            setAuthMode("login");
+            showToast("Session expired — please log in again", "error");
+            return null;
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             showToast(err.error || "Something went wrong", "error");
@@ -55,7 +154,7 @@ async function apiCall(path, options = {}) {
     }
 }
 
-
+// ---- TAB SWITCHING ----
 const tabBtns = document.querySelectorAll(".tab-btn");
 const tabContents = document.querySelectorAll(".tab-content");
 
@@ -78,7 +177,7 @@ function flashRow(row) {
     setTimeout(() => row.classList.remove("row-new"), 900);
 }
 
-
+// ---- PRODUCTS ----
 async function loadProducts() {
     const products = await apiCall("/products");
     if (!products) return;
@@ -139,7 +238,7 @@ document.getElementById("productForm").addEventListener("submit", async (e) => {
     }
 });
 
-
+// ---- SALES ----
 async function loadSales() {
     const sales = await apiCall("/sales");
     if (!sales) return;
@@ -189,7 +288,7 @@ document.getElementById("saleForm").addEventListener("submit", async (e) => {
     }
 });
 
-
+// ---- MPESA ----
 async function loadMpesa() {
     const txns = await apiCall("/mpesa");
     if (!txns) return;
@@ -234,7 +333,7 @@ document.getElementById("mpesaForm").addEventListener("submit", async (e) => {
     }
 });
 
-
+// ---- UNMATCHED TOTAL ----
 async function updateUnmatchedTotal() {
     const sales = await apiCall("/sales");
     const mpesa = await apiCall("/mpesa");
@@ -246,7 +345,7 @@ async function updateUnmatchedTotal() {
     document.getElementById("totalUnmatched").textContent = unmatchedSales + unmatchedMpesa;
 }
 
-
+// ---- RECONCILE ----
 async function runReconcile() {
     const resultsEl = document.getElementById("reconcileResults");
     resultsEl.innerHTML = '<p class="muted">Stamping the books…</p>';
@@ -298,7 +397,5 @@ document.getElementById("reconcileBtnTop").addEventListener("click", () => {
     runReconcile();
 });
 
-
-loadProducts();
-loadSales();
-loadMpesa().then(updateUnmatchedTotal);
+// ---- INITIAL LOAD ----
+checkExistingSession();

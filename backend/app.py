@@ -7,17 +7,11 @@ from collections import defaultdict
 
 app = Flask(__name__)
 
-# Session signing key — random each time the server starts, so old sessions
-# don't stay valid across restarts. Fine for a local single-user tool.
 app.secret_key = secrets.token_hex(32)
-
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-
-# Reject any request body larger than 100KB — no legitimate form submission here needs more
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024
 
-# Only allow requests from your own local frontend server, not any random website
 ALLOWED_ORIGIN = "http://127.0.0.1:5500"
 
 @app.after_request
@@ -32,12 +26,10 @@ def add_cors_headers(response):
 def request_too_large(e):
     return jsonify({"error": "Request body too large"}), 413
 
-# ---- Simple in-memory rate limiter: max N requests per IP per window ----
-RATE_LIMIT = 30          # max requests
-RATE_WINDOW = 10         # seconds
+RATE_LIMIT = 30
+RATE_WINDOW = 10
 request_log = defaultdict(list)
 
-# Routes that don't require login
 PUBLIC_ROUTES = {"/signup", "/login"}
 
 @app.before_request
@@ -52,13 +44,17 @@ def rate_limit_and_auth():
     request_log[ip].append(now)
 
     if request.method == "OPTIONS":
-        return  # let CORS preflight through
+        return
 
     if request.path in PUBLIC_ROUTES:
         return
 
     if not session.get("user_id"):
         return jsonify({"error": "Not logged in"}), 401
+
+
+def current_user_id():
+    return session["user_id"]
 
 
 # ---- AUTH ----
@@ -136,13 +132,16 @@ def logout():
 def me():
     return jsonify({"username": session.get("username")})
 
+
 # Make sure database exists on startup
 init_db()
 
 @app.route("/products", methods=["GET"])
 def get_products():
     conn = get_connection()
-    products = conn.execute("SELECT * FROM products").fetchall()
+    products = conn.execute(
+        "SELECT * FROM products WHERE user_id = ?", (current_user_id(),)
+    ).fetchall()
     conn.close()
     return jsonify([dict(p) for p in products])
 
@@ -168,8 +167,8 @@ def add_product():
 
     conn = get_connection()
     cursor = conn.execute(
-        "INSERT INTO products (name, price, stock) VALUES (?, ?, ?)",
-        (name, price, stock)
+        "INSERT INTO products (user_id, name, price, stock) VALUES (?, ?, ?, ?)",
+        (current_user_id(), name, price, stock)
     )
     conn.commit()
     new_id = cursor.lastrowid
@@ -185,7 +184,9 @@ def update_product(product_id):
 
     conn = get_connection()
 
-    product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    product = conn.execute(
+        "SELECT * FROM products WHERE id = ? AND user_id = ?", (product_id, current_user_id())
+    ).fetchone()
     if not product:
         conn.close()
         return jsonify({"error": "Product not found"}), 404
@@ -208,8 +209,8 @@ def update_product(product_id):
         return jsonify({"error": "stock must be zero or a positive whole number"}), 400
 
     conn.execute(
-        "UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?",
-        (name, price, stock, product_id)
+        "UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ? AND user_id = ?",
+        (name, price, stock, product_id, current_user_id())
     )
     conn.commit()
     conn.close()
@@ -219,7 +220,9 @@ def update_product(product_id):
 @app.route("/products/<int:product_id>", methods=["DELETE"])
 def delete_product(product_id):
     conn = get_connection()
-    conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    conn.execute(
+        "DELETE FROM products WHERE id = ? AND user_id = ?", (product_id, current_user_id())
+    )
     conn.commit()
     conn.close()
     return jsonify({"message": "Product deleted"})
@@ -233,8 +236,9 @@ def get_sales():
                sales.total_amount, sales.sale_time, sales.matched
         FROM sales
         JOIN products ON sales.product_id = products.id
+        WHERE sales.user_id = ?
         ORDER BY sales.sale_time DESC
-    """).fetchall()
+    """, (current_user_id(),)).fetchall()
     conn.close()
     return jsonify([dict(s) for s in sales])
 
@@ -257,7 +261,9 @@ def record_sale():
         return jsonify({"error": "quantity is unrealistically large"}), 400
 
     conn = get_connection()
-    product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    product = conn.execute(
+        "SELECT * FROM products WHERE id = ? AND user_id = ?", (product_id, current_user_id())
+    ).fetchone()
 
     if not product:
         conn.close()
@@ -270,12 +276,15 @@ def record_sale():
     total_amount = product["price"] * quantity
 
     conn.execute(
-        "INSERT INTO sales (product_id, quantity, total_amount) VALUES (?, ?, ?)",
-        (product_id, quantity, total_amount)
+        "INSERT INTO sales (user_id, product_id, quantity, total_amount) VALUES (?, ?, ?, ?)",
+        (current_user_id(), product_id, quantity, total_amount)
     )
 
     new_stock = product["stock"] - quantity
-    conn.execute("UPDATE products SET stock = ? WHERE id = ?", (new_stock, product_id))
+    conn.execute(
+        "UPDATE products SET stock = ? WHERE id = ? AND user_id = ?",
+        (new_stock, product_id, current_user_id())
+    )
 
     conn.commit()
     conn.close()
@@ -293,7 +302,8 @@ def record_sale():
 def get_mpesa_transactions():
     conn = get_connection()
     transactions = conn.execute(
-        "SELECT * FROM mpesa_transactions ORDER BY transaction_time DESC"
+        "SELECT * FROM mpesa_transactions WHERE user_id = ? ORDER BY transaction_time DESC",
+        (current_user_id(),)
     ).fetchall()
     conn.close()
     return jsonify([dict(t) for t in transactions])
@@ -331,8 +341,8 @@ def add_mpesa_transaction():
         return jsonify({"error": "This M-Pesa code has already been recorded"}), 409
 
     cursor = conn.execute(
-        "INSERT INTO mpesa_transactions (mpesa_code, sender_name, amount) VALUES (?, ?, ?)",
-        (mpesa_code, sender_name, amount)
+        "INSERT INTO mpesa_transactions (user_id, mpesa_code, sender_name, amount) VALUES (?, ?, ?, ?)",
+        (current_user_id(), mpesa_code, sender_name, amount)
     )
     conn.commit()
     new_id = cursor.lastrowid
@@ -348,13 +358,14 @@ def add_mpesa_transaction():
 
 @app.route("/reconcile", methods=["POST"])
 def reconcile():
+    uid = current_user_id()
     conn = get_connection()
 
     unmatched_sales = conn.execute(
-        "SELECT * FROM sales WHERE matched = 0 ORDER BY sale_time ASC"
+        "SELECT * FROM sales WHERE matched = 0 AND user_id = ? ORDER BY sale_time ASC", (uid,)
     ).fetchall()
     unmatched_mpesa = conn.execute(
-        "SELECT * FROM mpesa_transactions WHERE matched = 0 ORDER BY transaction_time ASC"
+        "SELECT * FROM mpesa_transactions WHERE matched = 0 AND user_id = ? ORDER BY transaction_time ASC", (uid,)
     ).fetchall()
 
     unmatched_mpesa_list = [dict(t) for t in unmatched_mpesa]
@@ -381,11 +392,13 @@ def reconcile():
 
     conn.commit()
 
-    still_unmatched_sales = conn.execute(
-        "SELECT sales.id, products.name, sales.quantity, sales.total_amount, sales.sale_time FROM sales JOIN products ON sales.product_id = products.id WHERE sales.matched = 0"
-    ).fetchall()
+    still_unmatched_sales = conn.execute("""
+        SELECT sales.id, products.name, sales.quantity, sales.total_amount, sales.sale_time
+        FROM sales JOIN products ON sales.product_id = products.id
+        WHERE sales.matched = 0 AND sales.user_id = ?
+    """, (uid,)).fetchall()
     still_unmatched_mpesa = conn.execute(
-        "SELECT * FROM mpesa_transactions WHERE matched = 0"
+        "SELECT * FROM mpesa_transactions WHERE matched = 0 AND user_id = ?", (uid,)
     ).fetchall()
 
     conn.close()

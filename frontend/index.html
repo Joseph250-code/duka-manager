@@ -8,7 +8,27 @@
 </head>
 <body>
 
-<div class="ledger">
+<!-- AUTH SCREEN -->
+<div class="auth-wrap" id="authWrap">
+    <div class="auth-card">
+        <h1 class="auth-title">Duka Manager</h1>
+        <p class="auth-sub" id="authModeLabel">Log in to your ledger</p>
+
+        <form id="authForm">
+            <input type="text" id="authUsername" placeholder="Username" required autocomplete="username">
+            <input type="password" id="authPassword" placeholder="Password" required autocomplete="current-password">
+            <button type="submit" id="authSubmitBtn">Log In</button>
+        </form>
+
+        <p class="auth-toggle">
+            <span id="authToggleText">Don't have an account?</span>
+            <a href="#" id="authToggleLink">Sign up</a>
+        </p>
+        <p class="auth-error" id="authError"></p>
+    </div>
+</div>
+
+<div class="ledger" id="ledgerApp" style="display:none;">
 
     <header class="ledger-head">
         <div class="head-left">
@@ -16,6 +36,8 @@
             <p class="ledger-no">Ledger No. <span id="ledgerNumber">001</span> &middot; <span id="todayDate"></span></p>
         </div>
         <div class="head-right">
+            <span class="logged-in-as" id="loggedInAs"></span>
+            <button id="logoutBtn" class="stamp-btn stamp-btn-logout">Log Out</button>
             <button id="reconcileBtnTop" class="stamp-btn">Reconcile Books</button>
         </div>
     </header>
