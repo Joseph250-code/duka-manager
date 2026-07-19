@@ -7,6 +7,8 @@ let mpesaCache = [];
 let paymentsCache = [];
 let clockTimer = null;
 let paymentPollTimer = null;
+let activeStockProductId = null;
+let stockLookupToken = 0;
 
 let activeCheckoutRequestId =
     localStorage.getItem("dukaActiveCheckoutId") || null;
@@ -20,6 +22,27 @@ const authToggleText = document.getElementById("authToggleText");
 const authToggleLink = document.getElementById("authToggleLink");
 const authError = document.getElementById("authError");
 
+const productForm = document.getElementById("productForm");
+const productBarcodeInput = document.getElementById("productBarcode");
+const productNameInput = document.getElementById("productName");
+const productPriceInput = document.getElementById("productPrice");
+const productStockInput = document.getElementById("productStock");
+const productSubmitBtn = document.getElementById("productSubmitBtn");
+const productBarcodeStatus = document.getElementById(
+    "productBarcodeStatus"
+);
+
+const saleBarcodeForm = document.getElementById("saleBarcodeForm");
+const saleBarcodeInput = document.getElementById("saleBarcode");
+const saleBarcodeBtn = document.getElementById("saleBarcodeBtn");
+const saleBarcodeStatus = document.getElementById("saleBarcodeStatus");
+const saleForm = document.getElementById("saleForm");
+const saleProductSelect = document.getElementById("saleProduct");
+const saleQuantityInput = document.getElementById("saleQuantity");
+const salePhoneInput = document.getElementById("salePhone");
+const saleSubmitBtn = document.getElementById("saleSubmitBtn");
+const saleStatus = document.getElementById("saleStatus");
+
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -31,144 +54,131 @@ function escapeHtml(value) {
 }
 
 
+function normalizeBarcode(value) {
+    return String(value ?? "")
+        .trim()
+        .replaceAll(" ", "")
+        .slice(0, 100);
+}
+
+
+function setStatus(element, message, type = "") {
+    if (!element) {
+        return;
+    }
+
+    element.textContent = message;
+    element.dataset.status = type;
+}
+
+
 function setAuthMode(mode) {
     authMode = mode;
 
-    const passwordInput =
-        document.getElementById("authPassword");
+    const passwordInput = document.getElementById("authPassword");
 
     if (mode === "login") {
-        authModeLabel.textContent =
-            "Log in to your ledger";
-
-        authSubmitBtn.textContent =
-            "Log In";
-
-        authToggleText.textContent =
-            "Don't have an account?";
-
-        authToggleLink.textContent =
-            "Sign up";
-
-        passwordInput.autocomplete =
-            "current-password";
+        authModeLabel.textContent = "Log in to your ledger";
+        authSubmitBtn.textContent = "Log In";
+        authToggleText.textContent = "Don't have an account?";
+        authToggleLink.textContent = "Sign up";
+        passwordInput.autocomplete = "current-password";
     } else {
-        authModeLabel.textContent =
-            "Create your ledger account";
-
-        authSubmitBtn.textContent =
-            "Sign Up";
-
-        authToggleText.textContent =
-            "Already have an account?";
-
-        authToggleLink.textContent =
-            "Log in";
-
-        passwordInput.autocomplete =
-            "new-password";
+        authModeLabel.textContent = "Create your ledger account";
+        authSubmitBtn.textContent = "Sign Up";
+        authToggleText.textContent = "Already have an account?";
+        authToggleLink.textContent = "Log in";
+        passwordInput.autocomplete = "new-password";
     }
 
     authError.textContent = "";
 }
 
 
-authToggleLink.addEventListener(
-    "click",
-    (event) => {
-        event.preventDefault();
+authToggleLink.addEventListener("click", (event) => {
+    event.preventDefault();
 
-        setAuthMode(
-            authMode === "login"
-                ? "signup"
-                : "login"
+    setAuthMode(
+        authMode === "login"
+            ? "signup"
+            : "login"
+    );
+});
+
+
+authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    authError.textContent = "";
+
+    const username = document
+        .getElementById("authUsername")
+        .value
+        .trim();
+
+    const password =
+        document.getElementById("authPassword").value;
+
+    const endpoint =
+        authMode === "login"
+            ? "/login"
+            : "/signup";
+
+    authSubmitBtn.disabled = true;
+
+    authSubmitBtn.textContent =
+        authMode === "login"
+            ? "Logging in..."
+            : "Creating account...";
+
+    try {
+        const response = await fetch(
+            `${API_URL}${endpoint}`,
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                credentials: "include",
+
+                body: JSON.stringify({
+                    username,
+                    password
+                })
+            }
         );
-    }
-);
 
+        const data =
+            await response
+                .json()
+                .catch(() => ({}));
 
-authForm.addEventListener(
-    "submit",
-    async (event) => {
-        event.preventDefault();
+        if (!response.ok) {
+            authError.textContent =
+                data.error ||
+                "Something went wrong";
 
-        authError.textContent = "";
+            return;
+        }
 
-        const username = document
-            .getElementById("authUsername")
-            .value
-            .trim();
+        authForm.reset();
 
-        const password =
-            document.getElementById(
-                "authPassword"
-            ).value;
-
-        const endpoint =
-            authMode === "login"
-                ? "/login"
-                : "/signup";
-
-        authSubmitBtn.disabled = true;
+        showApp(
+            data.username
+        );
+    } catch (error) {
+        authError.textContent =
+            "Can't reach the backend. Please try again.";
+    } finally {
+        authSubmitBtn.disabled = false;
 
         authSubmitBtn.textContent =
             authMode === "login"
-                ? "Logging in..."
-                : "Creating account...";
-
-        try {
-            const response = await fetch(
-                `${API_URL}${endpoint}`,
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    credentials: "include",
-
-                    body: JSON.stringify({
-                        username,
-                        password
-                    })
-                }
-            );
-
-            const data =
-                await response
-                    .json()
-                    .catch(() => ({}));
-
-            if (!response.ok) {
-                authError.textContent =
-                    data.error ||
-                    "Something went wrong";
-
-                return;
-            }
-
-            authForm.reset();
-
-            // Show the app immediately. Dashboard data loads
-            // in the background instead of delaying login.
-            showApp(
-                data.username
-            );
-        } catch (error) {
-            authError.textContent =
-                "Can't reach the backend. Please try again.";
-        } finally {
-            authSubmitBtn.disabled = false;
-
-            authSubmitBtn.textContent =
-                authMode === "login"
-                    ? "Log In"
-                    : "Sign Up";
-        }
+                ? "Log In"
+                : "Sign Up";
     }
-);
+});
 
 
 async function checkExistingSession() {
@@ -191,8 +201,6 @@ async function checkExistingSession() {
             await response.json();
 
         if (data.username) {
-            // Show the app immediately. Dashboard data loads
-            // in the background instead of delaying display.
             showApp(
                 data.username
             );
@@ -232,8 +240,6 @@ function showApp(username) {
 
     renderLedgerNumber();
 
-    // Do not block the screen while four dashboard
-    // requests are being completed.
     refreshDashboard()
         .then(() => {
             if (activeCheckoutRequestId) {
@@ -308,20 +314,22 @@ document
 
             authForm.reset();
 
+            resetStockForm();
+            resetSaleBarcode();
             setAuthMode("login");
         }
     );
 
 
-function toDate(sqliteTimestamp) {
-    if (!sqliteTimestamp) {
+function toDate(timestamp) {
+    if (!timestamp) {
         return null;
     }
 
     const normalized =
-        sqliteTimestamp.includes("T")
-            ? sqliteTimestamp
-            : `${sqliteTimestamp.replace(
+        timestamp.includes("T")
+            ? timestamp
+            : `${timestamp.replace(
                 " ",
                 "T"
             )}Z`;
@@ -337,15 +345,12 @@ function toDate(sqliteTimestamp) {
 }
 
 
-function toLocalTime(sqliteTimestamp) {
+function toLocalTime(timestamp) {
     const date =
-        toDate(sqliteTimestamp);
+        toDate(timestamp);
 
     if (!date) {
-        return (
-            sqliteTimestamp ||
-            "—"
-        );
+        return timestamp || "—";
     }
 
     return date.toLocaleString(
@@ -361,9 +366,9 @@ function toLocalTime(sqliteTimestamp) {
 }
 
 
-function isToday(sqliteTimestamp) {
+function isToday(timestamp) {
     const date =
-        toDate(sqliteTimestamp);
+        toDate(timestamp);
 
     if (!date) {
         return false;
@@ -526,10 +531,9 @@ function showToast(
 }
 
 
-async function apiCall(
+async function requestJson(
     path,
-    options = {},
-    silent = false
+    options = {}
 ) {
     try {
         const response =
@@ -558,40 +562,50 @@ async function apiCall(
                 "flex";
 
             setAuthMode("login");
-
-            if (!silent) {
-                showToast(
-                    "Session expired. Please log in again.",
-                    "error"
-                );
-            }
-
-            return null;
         }
 
-        if (!response.ok) {
-            if (!silent) {
-                showToast(
-                    data.error ||
-                        "Something went wrong",
-                    "error"
-                );
-            }
-
-            return null;
-        }
-
-        return data;
+        return {
+            ok: response.ok,
+            status: response.status,
+            data
+        };
     } catch (error) {
+        return {
+            ok: false,
+            status: 0,
+
+            data: {
+                error: "Can't reach the backend."
+            }
+        };
+    }
+}
+
+
+async function apiCall(
+    path,
+    options = {},
+    silent = false
+) {
+    const result =
+        await requestJson(
+            path,
+            options
+        );
+
+    if (!result.ok) {
         if (!silent) {
             showToast(
-                "Can't reach the backend.",
+                result.data.error ||
+                    "Something went wrong",
                 "error"
             );
         }
 
         return null;
     }
+
+    return result.data;
 }
 
 
@@ -626,6 +640,27 @@ function activateTab(tabName) {
             );
         }
     );
+
+    if (tabName === "products") {
+        setTimeout(
+            () =>
+                productBarcodeInput.focus(),
+            50
+        );
+    }
+
+    if (tabName === "sales") {
+        setTimeout(
+            () =>
+                saleBarcodeInput.focus(),
+            50
+        );
+    }
+
+    if (tabName === "mpesa") {
+        loadPayments();
+        loadMpesa();
+    }
 }
 
 
@@ -637,14 +672,6 @@ tabButtons.forEach(
                 activateTab(
                     button.dataset.tab
                 );
-
-                if (
-                    button.dataset.tab ===
-                    "mpesa"
-                ) {
-                    loadPayments();
-                    loadMpesa();
-                }
             }
         );
     }
@@ -661,10 +688,11 @@ function flashRow(row) {
     );
 
     setTimeout(
-        () =>
+        () => {
             row.classList.remove(
                 "row-new"
-            ),
+            );
+        },
         900
     );
 }
@@ -679,6 +707,468 @@ async function refreshDashboard() {
     ]);
 
     updateUnmatchedTotal();
+}
+
+
+// ==========================================================
+// BARCODE LOOKUP
+// ==========================================================
+
+async function lookupProductByBarcode(
+    barcode
+) {
+    const cleanBarcode =
+        normalizeBarcode(
+            barcode
+        );
+
+    if (!cleanBarcode) {
+        return {
+            found: false,
+            status: 400,
+            product: null,
+            error: "Enter or scan a barcode."
+        };
+    }
+
+    const cached =
+        productsCache.find(
+            (product) =>
+                normalizeBarcode(
+                    product.barcode
+                ) === cleanBarcode
+        );
+
+    if (cached) {
+        return {
+            found: true,
+            status: 200,
+            product: cached,
+            error: null
+        };
+    }
+
+    const result =
+        await requestJson(
+            `/products/barcode/${encodeURIComponent(
+                cleanBarcode
+            )}`
+        );
+
+    if (result.ok) {
+        return {
+            found: true,
+            status: result.status,
+            product: result.data,
+            error: null
+        };
+    }
+
+    return {
+        found: false,
+        status: result.status,
+        product: null,
+
+        error:
+            result.data.error ||
+            "Product not found"
+    };
+}
+
+
+function setStockExistingMode(
+    product
+) {
+    activeStockProductId =
+        product.id;
+
+    productBarcodeInput.value =
+        product.barcode || "";
+
+    productNameInput.value =
+        product.name;
+
+    productPriceInput.value =
+        Number(
+            product.price
+        ).toFixed(2);
+
+    productStockInput.value =
+        "";
+
+    productNameInput.readOnly =
+        true;
+
+    productPriceInput.readOnly =
+        true;
+
+    productSubmitBtn.textContent =
+        "Add to existing stock";
+
+    setStatus(
+        productBarcodeStatus,
+
+        `${product.name} found. ` +
+            `Current stock: ${product.stock}. ` +
+            "Enter the quantity being added.",
+
+        "found"
+    );
+
+    productStockInput.focus();
+}
+
+
+function setStockNewMode(
+    barcode = ""
+) {
+    activeStockProductId =
+        null;
+
+    productNameInput.readOnly =
+        false;
+
+    productPriceInput.readOnly =
+        false;
+
+    productSubmitBtn.textContent =
+        "Add entry";
+
+    if (barcode) {
+        setStatus(
+            productBarcodeStatus,
+
+            "New barcode. Enter the product " +
+                "name, price and quantity.",
+
+            "new"
+        );
+
+        productNameInput.focus();
+    } else {
+        setStatus(
+            productBarcodeStatus,
+            ""
+        );
+    }
+}
+
+
+function resetStockForm(
+    keepBarcode = false
+) {
+    const barcode =
+        keepBarcode
+            ? productBarcodeInput.value
+            : "";
+
+    productForm.reset();
+
+    productBarcodeInput.value =
+        barcode;
+
+    activeStockProductId =
+        null;
+
+    productNameInput.readOnly =
+        false;
+
+    productPriceInput.readOnly =
+        false;
+
+    productSubmitBtn.disabled =
+        false;
+
+    productSubmitBtn.textContent =
+        "Add entry";
+
+    setStatus(
+        productBarcodeStatus,
+        ""
+    );
+}
+
+
+async function handleStockBarcodeLookup() {
+    const barcode =
+        normalizeBarcode(
+            productBarcodeInput.value
+        );
+
+    productBarcodeInput.value =
+        barcode;
+
+    if (!barcode) {
+        resetStockForm();
+        productBarcodeInput.focus();
+
+        return;
+    }
+
+    const token =
+        ++stockLookupToken;
+
+    productSubmitBtn.disabled =
+        true;
+
+    setStatus(
+        productBarcodeStatus,
+        "Checking barcode...",
+        "loading"
+    );
+
+    const result =
+        await lookupProductByBarcode(
+            barcode
+        );
+
+    if (
+        token !==
+        stockLookupToken
+    ) {
+        return;
+    }
+
+    productSubmitBtn.disabled =
+        false;
+
+    if (result.found) {
+        setStockExistingMode(
+            result.product
+        );
+
+        return;
+    }
+
+    if (
+        result.status === 404
+    ) {
+        productNameInput.value =
+            "";
+
+        productPriceInput.value =
+            "";
+
+        productStockInput.value =
+            "";
+
+        setStockNewMode(
+            barcode
+        );
+
+        return;
+    }
+
+    setStockNewMode(
+        barcode
+    );
+
+    setStatus(
+        productBarcodeStatus,
+
+        result.error ||
+            "Barcode lookup failed.",
+
+        "error"
+    );
+}
+
+
+productBarcodeInput.addEventListener(
+    "keydown",
+    (event) => {
+        if (
+            event.key === "Enter"
+        ) {
+            event.preventDefault();
+
+            handleStockBarcodeLookup();
+        }
+    }
+);
+
+
+productBarcodeInput.addEventListener(
+    "input",
+    () => {
+        const currentProduct =
+            productsCache.find(
+                (product) =>
+                    product.id ===
+                    activeStockProductId
+            );
+
+        if (
+            activeStockProductId &&
+
+            normalizeBarcode(
+                productBarcodeInput.value
+            ) !==
+
+                normalizeBarcode(
+                    currentProduct?.barcode
+                )
+        ) {
+            activeStockProductId =
+                null;
+
+            productNameInput.value =
+                "";
+
+            productPriceInput.value =
+                "";
+
+            productStockInput.value =
+                "";
+
+            setStockNewMode();
+        }
+    }
+);
+
+
+productBarcodeInput.addEventListener(
+    "blur",
+    () => {
+        const barcode =
+            normalizeBarcode(
+                productBarcodeInput.value
+            );
+
+        if (
+            barcode &&
+            !activeStockProductId
+        ) {
+            handleStockBarcodeLookup();
+        }
+    }
+);
+
+
+saleBarcodeForm.addEventListener(
+    "submit",
+    async (event) => {
+        event.preventDefault();
+
+        const barcode =
+            normalizeBarcode(
+                saleBarcodeInput.value
+            );
+
+        saleBarcodeInput.value =
+            barcode;
+
+        if (!barcode) {
+            setStatus(
+                saleBarcodeStatus,
+                "Scan or enter a barcode.",
+                "error"
+            );
+
+            saleBarcodeInput.focus();
+
+            return;
+        }
+
+        saleBarcodeBtn.disabled =
+            true;
+
+        saleBarcodeBtn.textContent =
+            "Finding...";
+
+        setStatus(
+            saleBarcodeStatus,
+            "Checking barcode...",
+            "loading"
+        );
+
+        const result =
+            await lookupProductByBarcode(
+                barcode
+            );
+
+        saleBarcodeBtn.disabled =
+            false;
+
+        saleBarcodeBtn.textContent =
+            "Find item";
+
+        if (!result.found) {
+            setStatus(
+                saleBarcodeStatus,
+
+                result.status === 404
+                    ? (
+                        "Product not found. Add it " +
+                        "in the Stock tab first."
+                    )
+                    : (
+                        result.error ||
+                        "Barcode lookup failed."
+                    ),
+
+                "error"
+            );
+
+            saleBarcodeInput.select();
+
+            return;
+        }
+
+        const product =
+            result.product;
+
+        const optionExists =
+            Array
+                .from(
+                    saleProductSelect.options
+                )
+                .some(
+                    (option) =>
+                        Number(
+                            option.value
+                        ) ===
+                        Number(
+                            product.id
+                        )
+                );
+
+        if (!optionExists) {
+            await loadProducts();
+        }
+
+        saleProductSelect.value =
+            String(
+                product.id
+            );
+
+        saleQuantityInput.value =
+            "1";
+
+        updateSaleTotal();
+
+        setStatus(
+            saleBarcodeStatus,
+
+            `${product.name} selected. ` +
+                `Available stock: ${product.stock}.`,
+
+            "found"
+        );
+
+        salePhoneInput.focus();
+    }
+);
+
+
+function resetSaleBarcode() {
+    saleBarcodeInput.value =
+        "";
+
+    setStatus(
+        saleBarcodeStatus,
+        ""
+    );
 }
 
 
@@ -704,14 +1194,18 @@ async function loadProducts() {
             "productsBody"
         );
 
-    body.innerHTML = "";
+    body.innerHTML =
+        "";
 
     if (!products.length) {
         body.innerHTML =
-            '<tr><td colspan="4">No stock entries yet.</td></tr>';
+            '<tr><td colspan="5">' +
+            "No stock entries yet." +
+            "</td></tr>";
     }
 
-    let totalStock = 0;
+    let totalStock =
+        0;
 
     products.forEach(
         (product) => {
@@ -725,10 +1219,20 @@ async function loadProducts() {
                     "tr"
                 );
 
+            row.dataset.id =
+                product.id;
+
             row.innerHTML = `
                 <td>
                     ${escapeHtml(
                         product.name
+                    )}
+                </td>
+
+                <td class="mono">
+                    ${escapeHtml(
+                        product.barcode ||
+                            "—"
                     )}
                 </td>
 
@@ -752,7 +1256,9 @@ async function loadProducts() {
                 </td>
             `;
 
-            body.appendChild(row);
+            body.appendChild(
+                row
+            );
         }
     );
 
@@ -761,15 +1267,10 @@ async function loadProducts() {
     ).textContent =
         totalStock;
 
-    const saleSelect =
-        document.getElementById(
-            "saleProduct"
-        );
-
     const previousValue =
-        saleSelect.value;
+        saleProductSelect.value;
 
-    saleSelect.innerHTML =
+    saleProductSelect.innerHTML =
         products.length
             ? products
                 .map(
@@ -793,13 +1294,16 @@ async function loadProducts() {
 
     if (
         previousValue &&
+
         products.some(
             (product) =>
-                String(product.id) ===
+                String(
+                    product.id
+                ) ===
                 previousValue
         )
     ) {
-        saleSelect.value =
+        saleProductSelect.value =
             previousValue;
     }
 
@@ -814,6 +1318,27 @@ async function loadProducts() {
                 button.addEventListener(
                     "click",
                     async () => {
+                        const product =
+                            productsCache.find(
+                                (item) =>
+                                    String(
+                                        item.id
+                                    ) ===
+                                    button.dataset.id
+                            );
+
+                        const confirmed =
+                            window.confirm(
+                                `Remove ${
+                                    product?.name ||
+                                    "this product"
+                                } from stock?`
+                            );
+
+                        if (!confirmed) {
+                            return;
+                        }
+
                         const result =
                             await apiCall(
                                 `/products/${button.dataset.id}`,
@@ -828,6 +1353,15 @@ async function loadProducts() {
                                 "Stock entry removed"
                             );
 
+                            if (
+                                activeStockProductId ===
+                                Number(
+                                    button.dataset.id
+                                )
+                            ) {
+                                resetStockForm();
+                            }
+
                             await loadProducts();
                         }
                     }
@@ -839,47 +1373,80 @@ async function loadProducts() {
 }
 
 
-document
-    .getElementById(
-        "productForm"
-    )
-    .addEventListener(
-        "submit",
-        async (event) => {
-            event.preventDefault();
+productForm.addEventListener(
+    "submit",
+    async (event) => {
+        event.preventDefault();
 
-            const name =
-                document
-                    .getElementById(
-                        "productName"
-                    )
-                    .value
-                    .trim();
+        const barcode =
+            normalizeBarcode(
+                productBarcodeInput.value
+            );
 
-            const price =
-                Number.parseFloat(
-                    document
-                        .getElementById(
-                            "productPrice"
-                        )
-                        .value
+        const name =
+            productNameInput
+                .value
+                .trim();
+
+        const price =
+            Number.parseFloat(
+                productPriceInput.value
+            );
+
+        const quantity =
+            Number.parseInt(
+                productStockInput.value,
+                10
+            );
+
+        if (
+            !Number.isInteger(
+                quantity
+            ) ||
+            quantity < 0
+        ) {
+            showToast(
+                "Enter a valid stock quantity",
+                "error"
+            );
+
+            productStockInput.focus();
+
+            return;
+        }
+
+        productSubmitBtn.disabled =
+            true;
+
+        if (
+            activeStockProductId
+        ) {
+            if (
+                quantity <= 0
+            ) {
+                showToast(
+                    "Enter a quantity greater " +
+                        "than zero to add stock",
+                    "error"
                 );
 
-            const stock =
-                Number.parseInt(
-                    document
-                        .getElementById(
-                            "productStock"
-                        )
-                        .value,
-                    10
-                );
+                productSubmitBtn.disabled =
+                    false;
+
+                productStockInput.focus();
+
+                return;
+            }
+
+            productSubmitBtn.textContent =
+                "Adding stock...";
 
             const result =
                 await apiCall(
-                    "/products",
+                    `/products/${activeStockProductId}/add-stock`,
                     {
-                        method: "POST",
+                        method:
+                            "POST",
 
                         headers: {
                             "Content-Type":
@@ -888,32 +1455,167 @@ document
 
                         body:
                             JSON.stringify({
-                                name,
-                                price,
-                                stock
+                                quantity
                             })
                     }
                 );
 
+            productSubmitBtn.disabled =
+                false;
+
             if (!result) {
+                productSubmitBtn.textContent =
+                    "Add to existing stock";
+
                 return;
             }
 
-            event.target.reset();
-
             showToast(
-                `${name} added to stock`
+                `${result.name} stock ` +
+                    `increased by ${quantity}`
             );
+
+            resetStockForm();
 
             await loadProducts();
 
             flashRow(
                 document.querySelector(
-                    "#productsBody tr"
+                    `#productsBody tr[data-id="${result.id}"]`
                 )
             );
+
+            productBarcodeInput.focus();
+
+            return;
         }
-    );
+
+        if (!name) {
+            showToast(
+                "Enter the product name",
+                "error"
+            );
+
+            productSubmitBtn.disabled =
+                false;
+
+            productNameInput.focus();
+
+            return;
+        }
+
+        if (
+            !Number.isFinite(
+                price
+            ) ||
+            price <= 0
+        ) {
+            showToast(
+                "Enter a valid product price",
+                "error"
+            );
+
+            productSubmitBtn.disabled =
+                false;
+
+            productPriceInput.focus();
+
+            return;
+        }
+
+        productSubmitBtn.textContent =
+            "Adding entry...";
+
+        const result =
+            await requestJson(
+                "/products",
+                {
+                    method:
+                        "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            barcode:
+                                barcode ||
+                                null,
+
+                            name,
+                            price,
+                            stock:
+                                quantity
+                        })
+                }
+            );
+
+        productSubmitBtn.disabled =
+            false;
+
+        productSubmitBtn.textContent =
+            "Add entry";
+
+        if (!result.ok) {
+            if (
+                result.status === 409 &&
+                result.data.existing_product
+            ) {
+                productsCache = [
+                    ...productsCache.filter(
+                        (product) =>
+                            product.id !==
+                            result.data
+                                .existing_product
+                                .id
+                    ),
+
+                    result.data
+                        .existing_product
+                ];
+
+                setStockExistingMode(
+                    result.data
+                        .existing_product
+                );
+
+                showToast(
+                    "That barcode already exists. " +
+                        "Enter quantity to add stock.",
+                    "error"
+                );
+
+                return;
+            }
+
+            showToast(
+                result.data.error ||
+                    "Could not add product",
+                "error"
+            );
+
+            return;
+        }
+
+        showToast(
+            `${name} added to stock`
+        );
+
+        resetStockForm();
+
+        await loadProducts();
+
+        flashRow(
+            document.querySelector(
+                `#productsBody tr[data-id="${result.data.id}"]`
+            )
+        );
+
+        productBarcodeInput.focus();
+    }
+);
 
 
 // ==========================================================
@@ -922,27 +1624,34 @@ document
 
 async function loadSales() {
     const sales =
-        await apiCall("/sales");
+        await apiCall(
+            "/sales"
+        );
 
     if (!sales) {
         return null;
     }
 
-    salesCache = sales;
+    salesCache =
+        sales;
 
     const body =
         document.getElementById(
             "salesBody"
         );
 
-    body.innerHTML = "";
+    body.innerHTML =
+        "";
 
     if (!sales.length) {
         body.innerHTML =
-            '<tr><td colspan="5">No confirmed sales yet.</td></tr>';
+            '<tr><td colspan="5">' +
+            "No confirmed sales yet." +
+            "</td></tr>";
     }
 
-    let totalToday = 0;
+    let totalToday =
+        0;
 
     sales.forEach(
         (sale) => {
@@ -1006,14 +1715,18 @@ async function loadSales() {
                 </td>
             `;
 
-            body.appendChild(row);
+            body.appendChild(
+                row
+            );
         }
     );
 
     document.getElementById(
         "totalSales"
     ).textContent =
-        formatKes(totalToday);
+        formatKes(
+            totalToday
+        );
 
     return sales;
 }
@@ -1022,20 +1735,19 @@ async function loadSales() {
 function selectedSaleProduct() {
     const productId =
         Number.parseInt(
-            document
-                .getElementById(
-                    "saleProduct"
-                )
-                .value,
+            saleProductSelect.value,
             10
         );
 
     return (
         productsCache.find(
             (product) =>
-                product.id ===
+                Number(
+                    product.id
+                ) ===
                 productId
-        ) || null
+        ) ||
+        null
     );
 }
 
@@ -1046,201 +1758,224 @@ function updateSaleTotal() {
 
     const quantity =
         Number.parseInt(
-            document
-                .getElementById(
-                    "saleQuantity"
-                )
-                .value,
+            saleQuantityInput.value,
             10
         ) || 0;
 
     const total =
         product &&
         quantity > 0
-            ? product.price *
+            ? (
+                Number(
+                    product.price
+                ) *
                 quantity
+            )
             : 0;
 
     document.getElementById(
         "saleTotal"
     ).textContent =
-        formatKes(total);
+        formatKes(
+            total
+        );
 }
 
 
-document
-    .getElementById(
-        "saleProduct"
-    )
-    .addEventListener(
-        "change",
-        updateSaleTotal
-    );
+saleProductSelect.addEventListener(
+    "change",
+    () => {
+        updateSaleTotal();
+
+        const product =
+            selectedSaleProduct();
+
+        if (
+            product?.barcode
+        ) {
+            saleBarcodeInput.value =
+                product.barcode;
+
+            setStatus(
+                saleBarcodeStatus,
+
+                `${product.name} selected. ` +
+                    `Available stock: ${product.stock}.`,
+
+                "found"
+            );
+        } else {
+            resetSaleBarcode();
+        }
+    }
+);
 
 
-document
-    .getElementById(
-        "saleQuantity"
-    )
-    .addEventListener(
-        "input",
-        updateSaleTotal
-    );
+saleQuantityInput.addEventListener(
+    "input",
+    updateSaleTotal
+);
 
 
-document
-    .getElementById(
-        "saleForm"
-    )
-    .addEventListener(
-        "submit",
-        async (event) => {
-            event.preventDefault();
+saleForm.addEventListener(
+    "submit",
+    async (event) => {
+        event.preventDefault();
 
-            const product =
-                selectedSaleProduct();
+        const product =
+            selectedSaleProduct();
 
-            const quantity =
-                Number.parseInt(
-                    document
-                        .getElementById(
-                            "saleQuantity"
-                        )
-                        .value,
-                    10
-                );
-
-            const phoneNumber =
-                document
-                    .getElementById(
-                        "salePhone"
-                    )
-                    .value
-                    .trim();
-
-            const statusElement =
-                document.getElementById(
-                    "saleStatus"
-                );
-
-            const submitButton =
-                document.getElementById(
-                    "saleSubmitBtn"
-                );
-
-            if (!product) {
-                showToast(
-                    "Select a valid product",
-                    "error"
-                );
-
-                return;
-            }
-
-            if (
-                !Number.isInteger(
-                    quantity
-                ) ||
-                quantity <= 0
-            ) {
-                showToast(
-                    "Enter a valid quantity",
-                    "error"
-                );
-
-                return;
-            }
-
-            if (
-                quantity >
-                product.stock
-            ) {
-                showToast(
-                    "Not enough stock available",
-                    "error"
-                );
-
-                return;
-            }
-
-            submitButton.disabled =
-                true;
-
-            submitButton.textContent =
-                "Sending prompt...";
-
-            statusElement.textContent =
-                "Reserving stock and contacting M-Pesa...";
-
-            const result =
-                await apiCall(
-                    "/sales/request-payment",
-                    {
-                        method: "POST",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
-
-                        body:
-                            JSON.stringify({
-                                product_id:
-                                    product.id,
-
-                                quantity,
-
-                                phone_number:
-                                    phoneNumber
-                            })
-                    }
-                );
-
-            submitButton.disabled =
-                false;
-
-            submitButton.textContent =
-                "Send M-Pesa prompt";
-
-            if (!result) {
-                statusElement.textContent =
-                    "Payment request was not sent.";
-
-                await loadProducts();
-
-                return;
-            }
-
-            activeCheckoutRequestId =
-                result
-                    .checkout_request_id;
-
-            localStorage.setItem(
-                "dukaActiveCheckoutId",
-                activeCheckoutRequestId
+        const quantity =
+            Number.parseInt(
+                saleQuantityInput.value,
+                10
             );
 
-            statusElement.textContent =
-                `Prompt sent for ${formatKes(
-                    result.amount
-                )}. ` +
-                "Check the M-Pesa tab for live updates.";
+        const phoneNumber =
+            salePhoneInput
+                .value
+                .trim();
 
+        if (!product) {
             showToast(
-                "M-Pesa prompt sent"
+                "Select a valid product",
+                "error"
+            );
+
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                quantity
+            ) ||
+            quantity <= 0
+        ) {
+            showToast(
+                "Enter a valid quantity",
+                "error"
+            );
+
+            saleQuantityInput.focus();
+
+            return;
+        }
+
+        if (
+            quantity >
+            Number(
+                product.stock
+            )
+        ) {
+            showToast(
+                "Not enough stock available",
+                "error"
+            );
+
+            saleQuantityInput.focus();
+
+            return;
+        }
+
+        saleSubmitBtn.disabled =
+            true;
+
+        saleSubmitBtn.textContent =
+            "Sending prompt...";
+
+        setStatus(
+            saleStatus,
+
+            "Reserving stock and " +
+                "contacting M-Pesa...",
+
+            "loading"
+        );
+
+        const result =
+            await apiCall(
+                "/sales/request-payment",
+                {
+                    method:
+                        "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            product_id:
+                                Number(
+                                    product.id
+                                ),
+
+                            quantity,
+
+                            phone_number:
+                                phoneNumber
+                        })
+                }
+            );
+
+        saleSubmitBtn.disabled =
+            false;
+
+        saleSubmitBtn.textContent =
+            "Send M-Pesa prompt";
+
+        if (!result) {
+            setStatus(
+                saleStatus,
+                "Payment request was not sent.",
+                "error"
             );
 
             await loadProducts();
 
-            await loadPayments();
-
-            activateTab("mpesa");
-
-            startPaymentPolling(
-                activeCheckoutRequestId
-            );
+            return;
         }
-    );
+
+        activeCheckoutRequestId =
+            result
+                .checkout_request_id;
+
+        localStorage.setItem(
+            "dukaActiveCheckoutId",
+            activeCheckoutRequestId
+        );
+
+        setStatus(
+            saleStatus,
+
+            `Prompt sent for ${formatKes(
+                result.amount
+            )}. ` +
+                "Check the M-Pesa tab " +
+                "for live updates.",
+
+            "found"
+        );
+
+        showToast(
+            "M-Pesa prompt sent"
+        );
+
+        await Promise.all([
+            loadProducts(),
+            loadPayments()
+        ]);
+
+        activateTab(
+            "mpesa"
+        );
+
+        startPaymentPolling(
+            activeCheckoutRequestId
+        );
+    }
+);
 
 
 // ==========================================================
@@ -1277,7 +2012,9 @@ function paymentStampClass(status) {
         [
             "initiating",
             "pending"
-        ].includes(status)
+        ].includes(
+            status
+        )
     ) {
         return "";
     }
@@ -1390,7 +2127,8 @@ async function loadPayments() {
         payments;
 
     renderLatestPayment(
-        payments[0] || null
+        payments[0] ||
+        null
     );
 
     const body =
@@ -1398,11 +2136,14 @@ async function loadPayments() {
             "paymentsBody"
         );
 
-    body.innerHTML = "";
+    body.innerHTML =
+        "";
 
     if (!payments.length) {
         body.innerHTML =
-            '<tr><td colspan="6">No payment requests yet.</td></tr>';
+            '<tr><td colspan="6">' +
+            "No payment requests yet." +
+            "</td></tr>";
 
         return payments;
     }
@@ -1442,9 +2183,7 @@ async function loadPayments() {
 
                     ${
                         payment.quantity
-                            ? (
-                                ` × ${payment.quantity}`
-                            )
+                            ? ` × ${payment.quantity}`
                             : ""
                     }
                 </td>
@@ -1473,7 +2212,9 @@ async function loadPayments() {
                 </td>
             `;
 
-            body.appendChild(row);
+            body.appendChild(
+                row
+            );
         }
     );
 
@@ -1502,7 +2243,8 @@ function stopPaymentPolling(
             paymentPollTimer
         );
 
-        paymentPollTimer = null;
+        paymentPollTimer =
+            null;
     }
 
     if (clearSavedId) {
@@ -1519,7 +2261,9 @@ function stopPaymentPolling(
 async function handleTerminalPayment(
     payment
 ) {
-    stopPaymentPolling(true);
+    stopPaymentPolling(
+        true
+    );
 
     renderLatestPayment(
         payment
@@ -1527,27 +2271,26 @@ async function handleTerminalPayment(
 
     await refreshDashboard();
 
-    const statusElement =
-        document.getElementById(
-            "saleStatus"
-        );
-
     if (
         payment.status ===
         "success"
     ) {
-        statusElement.textContent =
-            `Payment confirmed. Receipt: ` +
-            `${payment.mpesa_receipt}.`;
+        setStatus(
+            saleStatus,
 
-        document
-            .getElementById(
-                "saleForm"
-            )
-            .reset();
+            `Payment confirmed. ` +
+                `Receipt: ${payment.mpesa_receipt}.`,
 
+            "found"
+        );
+
+        saleForm.reset();
+
+        saleQuantityInput.value =
+            "1";
+
+        resetSaleBarcode();
         updateSaleTotal();
-
         bumpLedgerNumber();
 
         showToast(
@@ -1569,16 +2312,25 @@ async function handleTerminalPayment(
         payment.status ===
         "paid_no_stock"
     ) {
-        statusElement.textContent =
-            "Payment received, but stock needs manual review.";
+        setStatus(
+            saleStatus,
+
+            "Payment received, but stock " +
+                "needs manual review.",
+
+            "error"
+        );
 
         showToast(
             "Payment needs manual review",
             "error"
         );
     } else {
-        statusElement.textContent =
-            payment.message;
+        setStatus(
+            saleStatus,
+            payment.message,
+            "error"
+        );
 
         showToast(
             paymentStatusLabel(
@@ -1603,29 +2355,44 @@ function startPaymentPolling(
         checkoutRequestId
     );
 
+    let pollRunning =
+        false;
+
     const pollOnce =
         async () => {
-            const payment =
-                await fetchPaymentStatus(
-                    checkoutRequestId
-                );
-
-            if (!payment) {
+            if (pollRunning) {
                 return;
             }
 
-            renderLatestPayment(
-                payment
-            );
+            pollRunning =
+                true;
 
-            await loadPayments();
+            try {
+                const payment =
+                    await fetchPaymentStatus(
+                        checkoutRequestId
+                    );
 
-            if (
-                payment.is_terminal
-            ) {
-                await handleTerminalPayment(
+                if (!payment) {
+                    return;
+                }
+
+                renderLatestPayment(
                     payment
                 );
+
+                await loadPayments();
+
+                if (
+                    payment.is_terminal
+                ) {
+                    await handleTerminalPayment(
+                        payment
+                    );
+                }
+            } finally {
+                pollRunning =
+                    false;
             }
         };
 
@@ -1661,7 +2428,8 @@ async function loadMpesa() {
             "mpesaBody"
         );
 
-    body.innerHTML = "";
+    body.innerHTML =
+        "";
 
     if (!transactions.length) {
         body.innerHTML =
@@ -1723,7 +2491,9 @@ async function loadMpesa() {
                 </td>
             `;
 
-            body.appendChild(row);
+            body.appendChild(
+                row
+            );
         }
     );
 
@@ -1771,7 +2541,8 @@ async function runReconcile() {
         await apiCall(
             "/reconcile",
             {
-                method: "POST"
+                method:
+                    "POST"
             }
         );
 

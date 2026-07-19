@@ -102,6 +102,7 @@
 
             <p class="ledger-no">
                 Ledger No.
+
                 <span id="ledgerNumber">
                     001
                 </span>
@@ -239,14 +240,30 @@
             <div class="card">
                 <h2>Add to stock</h2>
 
+                <p class="muted">
+                    Scan a barcode or enter it manually. For products
+                    without a barcode, leave the barcode box empty.
+                    Scanning an existing barcode will load that product
+                    so you can add more stock.
+                </p>
+
                 <form
                     id="productForm"
                     class="row-form"
                 >
                     <input
                         type="text"
+                        id="productBarcode"
+                        placeholder="Scan or enter barcode"
+                        maxlength="100"
+                        autocomplete="off"
+                    >
+
+                    <input
+                        type="text"
                         id="productName"
                         placeholder="Item name"
+                        maxlength="100"
                         required
                     >
 
@@ -262,15 +279,23 @@
                     <input
                         type="number"
                         id="productStock"
-                        placeholder="Quantity"
+                        placeholder="Quantity to add"
                         min="0"
                         required
                     >
 
-                    <button type="submit">
+                    <button
+                        type="submit"
+                        id="productSubmitBtn"
+                    >
                         Add entry
                     </button>
                 </form>
+
+                <p
+                    class="muted"
+                    id="productBarcodeStatus"
+                ></p>
             </div>
 
             <div class="card">
@@ -280,13 +305,20 @@
                     <thead>
                         <tr>
                             <th>Item</th>
+                            <th>Barcode</th>
                             <th>Price</th>
                             <th>Qty</th>
                             <th></th>
                         </tr>
                     </thead>
 
-                    <tbody id="productsBody"></tbody>
+                    <tbody id="productsBody">
+                        <tr>
+                            <td colspan="5">
+                                No stock entries yet.
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
         </section>
@@ -304,10 +336,36 @@
                 <h2>Sell with M-Pesa</h2>
 
                 <p class="muted">
-                    Select an item, enter the quantity and
-                    customer phone number. The sale will only
-                    be recorded after M-Pesa confirms payment.
+                    Scan a product barcode or select the product
+                    manually. Enter the quantity and customer phone
+                    number. The sale will only be recorded after
+                    M-Pesa confirms payment.
                 </p>
+
+                <form
+                    id="saleBarcodeForm"
+                    class="row-form"
+                >
+                    <input
+                        type="text"
+                        id="saleBarcode"
+                        placeholder="Scan or enter barcode"
+                        maxlength="100"
+                        autocomplete="off"
+                    >
+
+                    <button
+                        type="submit"
+                        id="saleBarcodeBtn"
+                    >
+                        Find item
+                    </button>
+                </form>
+
+                <p
+                    class="muted"
+                    id="saleBarcodeStatus"
+                ></p>
 
                 <form
                     id="saleForm"
@@ -316,13 +374,18 @@
                     <select
                         id="saleProduct"
                         required
-                    ></select>
+                    >
+                        <option value="">
+                            No products available
+                        </option>
+                    </select>
 
                     <input
                         type="number"
                         id="saleQuantity"
                         placeholder="Quantity"
                         min="1"
+                        value="1"
                         required
                     >
 
@@ -373,7 +436,13 @@
                         </tr>
                     </thead>
 
-                    <tbody id="salesBody"></tbody>
+                    <tbody id="salesBody">
+                        <tr>
+                            <td colspan="5">
+                                No confirmed sales yet.
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
         </section>
@@ -527,7 +596,13 @@
                         </tr>
                     </thead>
 
-                    <tbody id="mpesaBody"></tbody>
+                    <tbody id="mpesaBody">
+                        <tr>
+                            <td colspan="5">
+                                No confirmed M-Pesa transactions yet.
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
 

@@ -1,11 +1,4 @@
-@import url(
-    "https://fonts.googleapis.com/css2?family=Special+Elite&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-);
-
-
-/* =========================================================
-   DESIGN VARIABLES
-========================================================= */
+@import url("https://fonts.googleapis.com/css2?family=Special+Elite&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
 :root {
     --paper: #f0ead8;
@@ -18,11 +11,6 @@
     --rule: #c9bfa0;
     --rule-strong: #a99c78;
 }
-
-
-/* =========================================================
-   GLOBAL
-========================================================= */
 
 * {
     box-sizing: border-box;
@@ -41,13 +29,12 @@ body {
     font-family: "Work Sans", sans-serif;
 
     background: var(--paper);
-    background-image:
-        repeating-linear-gradient(
-            180deg,
-            transparent,
-            transparent 31px,
-            rgba(169, 156, 120, 0.18) 32px
-        );
+    background-image: repeating-linear-gradient(
+        180deg,
+        transparent,
+        transparent 31px,
+        rgba(169, 156, 120, 0.18) 32px
+    );
 }
 
 button,
@@ -65,30 +52,21 @@ button:disabled:hover {
     background: var(--ink);
 }
 
+input[readonly] {
+    color: var(--ink-soft);
+    background: var(--paper-dark);
+    cursor: not-allowed;
+}
+
 .mono {
     font-family: "IBM Plex Mono", monospace;
 }
-
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.001ms !important;
-        transition-duration: 0.001ms !important;
-        scroll-behavior: auto !important;
-    }
-}
-
-
-/* =========================================================
-   LEDGER CONTAINER
-========================================================= */
 
 .ledger {
     position: relative;
 
     width: 100%;
-    max-width: 880px;
+    max-width: 980px;
     margin: 0 auto;
 
     background: var(--paper);
@@ -112,11 +90,6 @@ button:disabled:hover {
     background: var(--stamp-red);
     opacity: 0.35;
 }
-
-
-/* =========================================================
-   HEADER
-========================================================= */
 
 .ledger-head {
     display: flex;
@@ -162,11 +135,6 @@ button:disabled:hover {
     font-family: "IBM Plex Mono", monospace;
     font-size: 12px;
 }
-
-
-/* =========================================================
-   HEADER BUTTONS
-========================================================= */
 
 .stamp-btn {
     padding: 10px 18px;
@@ -217,11 +185,6 @@ select:focus-visible {
     outline-offset: 2px;
 }
 
-
-/* =========================================================
-   SUMMARY TOTALS
-========================================================= */
-
 .totals-line {
     display: flex;
     align-items: center;
@@ -257,11 +220,6 @@ select:focus-visible {
     font-size: 24px;
 }
 
-
-/* =========================================================
-   TABS
-========================================================= */
-
 .tabs {
     display: flex;
     gap: 4px;
@@ -281,7 +239,6 @@ select:focus-visible {
     padding: 10px 20px;
 
     color: var(--ink-soft);
-    font-family: "Work Sans", sans-serif;
     font-size: 14px;
     font-weight: 600;
     white-space: nowrap;
@@ -300,11 +257,6 @@ select:focus-visible {
     background: var(--paper);
     border-bottom: 1px solid var(--paper);
 }
-
-
-/* =========================================================
-   PAGE AND TAB CONTENT
-========================================================= */
 
 .page {
     padding: 32px 40px 40px 68px;
@@ -332,11 +284,6 @@ select:focus-visible {
     }
 }
 
-
-/* =========================================================
-   CARDS
-========================================================= */
-
 .card {
     margin-bottom: 24px;
     padding: 24px;
@@ -362,26 +309,25 @@ select:focus-visible {
     line-height: 1.5;
 }
 
-
-/* =========================================================
-   FORMS
-========================================================= */
-
 .row-form {
     display: flex;
+    align-items: flex-end;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.row-form + .row-form {
+    margin-top: 18px;
 }
 
 .row-form input,
 .row-form select {
     flex: 1;
 
-    min-width: 140px;
+    min-width: 145px;
     padding: 10px 6px;
 
     color: var(--ink);
-    font-family: "Work Sans", sans-serif;
     font-size: 14px;
 
     background: var(--paper);
@@ -401,6 +347,7 @@ select:focus-visible {
     font-family: "Special Elite", monospace;
     font-size: 13px;
     letter-spacing: 0.5px;
+    white-space: nowrap;
 
     background: var(--ink);
     border: none;
@@ -416,20 +363,73 @@ select:focus-visible {
     background: var(--stamp-green);
 }
 
+#productBarcode,
+#saleBarcode {
+    min-width: 220px;
+
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.4px;
+}
+
+#saleBarcodeForm {
+    margin-bottom: 4px;
+}
+
+#productBarcodeStatus,
+#saleBarcodeStatus,
 #saleStatus {
-    min-height: 20px;
+    min-height: 21px;
+    margin-top: 10px;
+    margin-bottom: 0;
+
     line-height: 1.5;
 }
 
+#productBarcodeStatus:empty,
+#saleBarcodeStatus:empty,
+#saleStatus:empty {
+    min-height: 0;
+    margin-top: 0;
+}
 
-/* =========================================================
-   TABLES
-========================================================= */
+#productBarcodeStatus[data-status="loading"],
+#saleBarcodeStatus[data-status="loading"],
+#saleStatus[data-status="loading"],
+#productBarcodeStatus[data-status="new"] {
+    color: var(--mustard);
+    font-weight: 600;
+}
+
+#productBarcodeStatus[data-status="found"],
+#saleBarcodeStatus[data-status="found"],
+#saleStatus[data-status="found"] {
+    color: var(--stamp-green);
+    font-weight: 600;
+}
+
+#productBarcodeStatus[data-status="error"],
+#saleBarcodeStatus[data-status="error"],
+#saleStatus[data-status="error"] {
+    color: var(--stamp-red);
+    font-weight: 600;
+}
+
+#products-tab .card:last-child,
+#sales-tab .card:last-child,
+#mpesa-tab .card,
+.recon-section {
+    overflow-x: auto;
+}
 
 table {
     width: 100%;
+    min-width: 620px;
 
     border-collapse: collapse;
+}
+
+#products-tab table {
+    min-width: 700px;
 }
 
 thead th {
@@ -448,6 +448,7 @@ tbody td {
     padding: 10px 6px;
 
     font-size: 14px;
+    vertical-align: middle;
 
     border-bottom: 1px solid var(--rule);
 }
@@ -456,10 +457,24 @@ tbody tr:hover {
     background: rgba(196, 143, 46, 0.08);
 }
 
+.del-btn {
+    padding: 7px 10px;
 
-/* =========================================================
-   STATUS STAMPS
-========================================================= */
+    color: var(--stamp-red);
+    font-family: "Special Elite", monospace;
+    font-size: 11px;
+
+    background: transparent;
+    border: 1px solid var(--stamp-red);
+    border-radius: 3px;
+
+    cursor: pointer;
+}
+
+.del-btn:hover {
+    color: var(--paper);
+    background: var(--stamp-red);
+}
 
 .stamp {
     display: inline-block;
@@ -504,11 +519,6 @@ tbody tr:hover {
         transform: scale(1) rotate(-6deg);
     }
 }
-
-
-/* =========================================================
-   M-PESA PAYMENT STATUS SCREEN
-========================================================= */
 
 .payment-status-card {
     border-left: 5px solid var(--mustard);
@@ -576,19 +586,10 @@ tbody tr:hover {
     flex-shrink: 0;
 }
 
-#mpesa-tab .card {
-    overflow-x: auto;
-}
-
 #paymentsBody td,
 #mpesaBody td {
     vertical-align: middle;
 }
-
-
-/* =========================================================
-   RECONCILIATION
-========================================================= */
 
 .reconcile-card #reconcileResults {
     margin-top: 20px;
@@ -605,21 +606,12 @@ tbody tr:hover {
     border-left: 3px solid var(--mustard);
 }
 
-.recon-section {
-    overflow-x: auto;
-}
-
 .recon-section h3 {
     margin: 20px 0 8px;
 
     font-family: "Special Elite", monospace;
     font-size: 14px;
 }
-
-
-/* =========================================================
-   ROW HIGHLIGHT
-========================================================= */
 
 @keyframes rowFlash {
     0% {
@@ -635,23 +627,19 @@ tbody tr:hover {
     animation: rowFlash 0.9s ease;
 }
 
-
-/* =========================================================
-   TOAST MESSAGES
-========================================================= */
-
 .toast {
     position: fixed;
     bottom: 24px;
     left: 50%;
     z-index: 999;
 
+    max-width: calc(100% - 32px);
     padding: 12px 22px;
 
     color: var(--paper);
-    font-family: "Work Sans", sans-serif;
     font-size: 14px;
     font-weight: 500;
+    text-align: center;
 
     background: var(--ink);
     border-radius: 6px;
@@ -676,11 +664,6 @@ tbody tr:hover {
 .toast-error {
     background: var(--stamp-red);
 }
-
-
-/* =========================================================
-   AUTHENTICATION SCREEN
-========================================================= */
 
 .auth-wrap {
     display: flex;
@@ -731,7 +714,6 @@ tbody tr:hover {
     padding: 10px 4px;
 
     color: var(--ink);
-    font-family: "Work Sans", sans-serif;
     font-size: 15px;
 
     background: var(--paper);
@@ -788,12 +770,17 @@ tbody tr:hover {
     font-size: 13px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
 
-/* =========================================================
-   TABLET AND MOBILE
-========================================================= */
-
-@media (max-width: 760px) {
+@media (max-width: 820px) {
     .payment-status-heading {
         flex-direction: column;
     }
@@ -808,7 +795,7 @@ tbody tr:hover {
     }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 680px) {
     body {
         padding: 16px 10px 50px;
     }
@@ -844,12 +831,14 @@ tbody tr:hover {
 
     .row-form {
         flex-direction: column;
+        align-items: stretch;
     }
 
     .row-form input,
     .row-form select,
     .row-form button {
         width: 100%;
+        min-width: 0;
     }
 
     .card {
@@ -884,5 +873,9 @@ tbody tr:hover {
 
     .total-item {
         width: calc(50% - 10px);
+    }
+
+    .toast {
+        width: calc(100% - 32px);
     }
 }
