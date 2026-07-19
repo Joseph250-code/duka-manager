@@ -151,7 +151,9 @@ authForm.addEventListener(
 
             authForm.reset();
 
-            await showApp(
+            // Show the app immediately. Dashboard data loads
+            // in the background instead of delaying login.
+            showApp(
                 data.username
             );
         } catch (error) {
@@ -189,7 +191,9 @@ async function checkExistingSession() {
             await response.json();
 
         if (data.username) {
-            await showApp(
+            // Show the app immediately. Dashboard data loads
+            // in the background instead of delaying display.
+            showApp(
                 data.username
             );
         } else {
@@ -203,7 +207,7 @@ async function checkExistingSession() {
 }
 
 
-async function showApp(username) {
+function showApp(username) {
     authWrap.style.display =
         "none";
 
@@ -228,41 +232,50 @@ async function showApp(username) {
 
     renderLedgerNumber();
 
-    await refreshDashboard();
+    // Do not block the screen while four dashboard
+    // requests are being completed.
+    refreshDashboard()
+        .then(() => {
+            if (activeCheckoutRequestId) {
+                startPaymentPolling(
+                    activeCheckoutRequestId
+                );
 
-    if (activeCheckoutRequestId) {
-        startPaymentPolling(
-            activeCheckoutRequestId
-        );
+                return;
+            }
 
-        return;
-    }
+            const pendingPayment =
+                paymentsCache.find(
+                    (payment) =>
+                        [
+                            "initiating",
+                            "pending"
+                        ].includes(
+                            payment.status
+                        )
+                );
 
-    const pendingPayment =
-        paymentsCache.find(
-            (payment) =>
-                [
-                    "initiating",
-                    "pending"
-                ].includes(
-                    payment.status
-                )
-        );
+            if (pendingPayment) {
+                activeCheckoutRequestId =
+                    pendingPayment
+                        .checkout_request_id;
 
-    if (pendingPayment) {
-        activeCheckoutRequestId =
-            pendingPayment
-                .checkout_request_id;
+                localStorage.setItem(
+                    "dukaActiveCheckoutId",
+                    activeCheckoutRequestId
+                );
 
-        localStorage.setItem(
-            "dukaActiveCheckoutId",
-            activeCheckoutRequestId
-        );
-
-        startPaymentPolling(
-            activeCheckoutRequestId
-        );
-    }
+                startPaymentPolling(
+                    activeCheckoutRequestId
+                );
+            }
+        })
+        .catch(() => {
+            showToast(
+                "Some dashboard information could not load.",
+                "error"
+            );
+        });
 }
 
 
