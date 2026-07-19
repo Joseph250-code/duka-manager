@@ -5,7 +5,11 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Read the Supabase connection string from Render.
+# strip() removes hidden spaces or line breaks.
+DATABASE_URL = (
+    os.getenv("DATABASE_URL") or ""
+).strip()
 
 if not DATABASE_URL:
     raise RuntimeError(
@@ -15,23 +19,20 @@ if not DATABASE_URL:
 
 def convert_sql(sql):
     """
-    Convert SQLite-style SQL used in app.py into
-    PostgreSQL-compatible SQL.
+    Convert the SQLite-style SQL still used in app.py
+    into PostgreSQL-compatible SQL.
     """
 
     converted = sql.strip()
 
-    # SQLite transaction command.
     if converted.upper() == "BEGIN IMMEDIATE":
         return "BEGIN"
 
-    # SQLite date calculation.
     converted = converted.replace(
         "datetime('now', '+15 minutes')",
         "CURRENT_TIMESTAMP + INTERVAL '15 minutes'",
     )
 
-    # SQLite INSERT OR IGNORE.
     insert_or_ignore = bool(
         re.match(
             r"^\s*INSERT\s+OR\s+IGNORE\s+INTO",
@@ -52,14 +53,18 @@ def convert_sql(sql):
         converted = converted.rstrip().rstrip(";")
         converted += " ON CONFLICT DO NOTHING"
 
-    # SQLite uses ?. PostgreSQL uses %s.
+    # SQLite placeholders use ? while PostgreSQL uses %s.
     converted = converted.replace("?", "%s")
 
     return converted
 
 
 class CursorProxy:
-    def __init__(self, cursor, lastrowid=None):
+    def __init__(
+        self,
+        cursor,
+        lastrowid=None,
+    ):
         self._cursor = cursor
         self.lastrowid = lastrowid
 
@@ -81,7 +86,11 @@ class ConnectionProxy:
     def __init__(self, connection):
         self._connection = connection
 
-    def execute(self, sql, parameters=None):
+    def execute(
+        self,
+        sql,
+        parameters=None,
+    ):
         converted_sql = convert_sql(sql)
 
         if parameters is None:
@@ -89,8 +98,11 @@ class ConnectionProxy:
 
         cursor = self._connection.cursor()
 
-        is_insert = converted_sql.lstrip().upper().startswith(
-            "INSERT INTO"
+        is_insert = (
+            converted_sql
+            .lstrip()
+            .upper()
+            .startswith("INSERT INTO")
         )
 
         has_returning = bool(
@@ -105,7 +117,9 @@ class ConnectionProxy:
 
         if is_insert and not has_returning:
             converted_sql = (
-                converted_sql.rstrip().rstrip(";")
+                converted_sql
+                .rstrip()
+                .rstrip(";")
                 + " RETURNING id"
             )
 
@@ -142,14 +156,16 @@ class ConnectionProxy:
 
 def get_connection():
     """
-    Connect to the Supabase PostgreSQL database using
-    the DATABASE_URL stored in Render.
+    Connect to Supabase PostgreSQL.
+    SSL is required separately so it cannot be affected
+    by hidden spaces in the Render connection string.
     """
 
     connection = psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row,
         connect_timeout=20,
+        sslmode="require",
     )
 
     return ConnectionProxy(connection)
@@ -157,8 +173,8 @@ def get_connection():
 
 def init_db():
     """
-    Create all required tables and indexes.
-    Existing tables and data are preserved.
+    Create the required tables and indexes.
+    Existing Supabase data is preserved.
     """
 
     conn = get_connection()
