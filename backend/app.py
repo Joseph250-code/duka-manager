@@ -40,7 +40,14 @@ RATE_LIMIT = 30
 RATE_WINDOW = 10
 request_log = defaultdict(list)
 
-PUBLIC_ROUTES = {"/signup", "/login", "/test-mpesa-token", "/mpesa-callback"}
+PUBLIC_ROUTES = {
+    "/",
+    "/health",
+    "/signup",
+    "/login",
+    "/test-mpesa-token",
+    "/mpesa-callback",
+}
 
 @app.before_request
 def rate_limit_and_auth():
@@ -167,6 +174,17 @@ def release_expired_reservations():
         raise
     finally:
         conn.close()
+
+
+
+
+@app.route("/", methods=["GET"])
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "service": "duka-manager-backend",
+    }), 200
 
 
 # ---- AUTH ----
